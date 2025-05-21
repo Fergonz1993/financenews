@@ -1,0 +1,14 @@
+# Financial News Summarizer Configuration
+
+# List of stock tickers, keywords, or topics to track
+queries:
+  - AAPL
+  - MSFT
+  - GOOGL
+  - "artificial intelligence"
+  - "federal reserve"
+  - "interest rates"
+  - "stock market"
+  - "S&P 500"
+  - "NASDAQ"
+  - "inflation"
