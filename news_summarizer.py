@@ -4,6 +4,8 @@
 
 import argparse
 import asyncio
+import feedparser
+import finnhub
 import json
 import logging
 import os
@@ -11,7 +13,7 @@ import re
 import smtplib
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
@@ -36,6 +38,7 @@ logger = logging.getLogger("news_summarizer")
 dotenv.load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 NEWS_API_KEY = os.getenv("NEWS_API_KEY")
+FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY")
 EMAIL_TO = os.getenv("EMAIL_TO")
 EMAIL_FROM = os.getenv("EMAIL_FROM")
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
@@ -44,6 +47,15 @@ EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
 
 # Initialize OpenAI client
 openai.api_key = OPENAI_API_KEY
+
+# Initialize Finnhub client if API key is available
+finnhub_client = None
+if FINNHUB_API_KEY and FINNHUB_API_KEY != "your_finnhub_api_key_here":
+    finnhub_client = finnhub.Client(api_key=FINNHUB_API_KEY)
+
+# Check if required API keys are available
+USE_NEWSAPI = NEWS_API_KEY and NEWS_API_KEY != "your_newsapi_key_here"
+USE_FINNHUB = finnhub_client is not None
 
 # Initialize Rich console
 console = Console()
@@ -71,6 +83,8 @@ class Article:
         self.summarized_headline: Optional[str] = None
         self.summary_bullets: List[str] = []
         self.why_it_matters: Optional[str] = None
+        self.sentiment: Optional[str] = None
+        self.sentiment_score: Optional[float] = None
 
     def __hash__(self) -> int:
         """Enable deduplication by hashing on title and URL."""
@@ -104,11 +118,20 @@ class NewsFetcher:
     def __init__(self, session: aiohttp.ClientSession):
         self.session = session
         self.rate_limiter = asyncio.Semaphore(1)  # Limit to 1 request per second
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0'
+        }
+        self.finnhub_client = finnhub_client
 
     async def fetch_from_newsapi(
         self, query: str, page_size: int = 100
     ) -> List[Article]:
         """Fetch news articles from NewsAPI based on query."""
+        # Skip if NewsAPI key is not configured
+        if not USE_NEWSAPI:
+            logger.warning("NewsAPI key not configured, skipping NewsAPI source")
+            return []
+            
         async with self.rate_limiter:
             try:
                 url = "https://newsapi.org/v2/everything"
@@ -144,12 +167,274 @@ class NewsFetcher:
                 # Rate limiting
                 await asyncio.sleep(1.0)
 
+    async def fetch_from_rss_feed(self, feed_url: str, source_name: str) -> List[Article]:
+        """Generic method to fetch articles from any RSS feed."""
+        try:
+            # Parse the RSS feed
+            news_feed = feedparser.parse(feed_url)
+            
+            articles = []
+            for entry in news_feed.entries:
+                # Extract the relevant information
+                title = entry.get('title', '')
+                url = entry.get('link', '')
+                published_at = entry.get('published', '')
+                
+                # Try different content fields that might be available
+                content = ''
+                if 'summary' in entry:
+                    content = entry.get('summary', '')
+                elif 'description' in entry:
+                    content = entry.get('description', '')
+                elif 'content' in entry:
+                    if isinstance(entry.content, list) and len(entry.content) > 0:
+                        content = entry.content[0].get('value', '')
+                
+                article = Article(
+                    title=title,
+                    url=url,
+                    source=source_name,
+                    published_at=published_at,
+                    content=content,
+                )
+                articles.append(article)
+                
+            return articles
+        except Exception as e:
+            logger.error(f"Error fetching from RSS feed {feed_url}: {e}")
+            return []
+
+    async def fetch_from_yahoo_finance_rss(self, query: str) -> List[Article]:
+        """Fetch news articles from Yahoo Finance RSS based on query."""
+        try:
+            # Format query for Yahoo Finance RSS
+            # If query looks like a ticker, use it directly; otherwise, skip
+            if re.match(r'^[A-Za-z]+$', query) or re.match(r'^[A-Za-z]+\.[A-Za-z]+$', query):
+                ticker = query
+                rss_feed_url = f'https://feeds.finance.yahoo.com/rss/2.0/headline?s={ticker}&region=US&lang=en-US'
+                return await self.fetch_from_rss_feed(rss_feed_url, "Yahoo Finance")
+            elif query == "market":  # Special case for general market news
+                rss_feed_url = 'https://finance.yahoo.com/news/rssindex'
+                return await self.fetch_from_rss_feed(rss_feed_url, "Yahoo Finance")
+            else:
+                # Skip non-ticker queries for Yahoo Finance
+                return []
+        except Exception as e:
+            logger.error(f"Error fetching from Yahoo Finance RSS: {e}")
+            return []
+            
+    async def fetch_from_cnbc_rss(self, query: str) -> List[Article]:
+        """Fetch news articles from CNBC RSS feeds."""
+        try:
+            all_articles = []
+            
+            # Map of CNBC RSS feeds by category
+            cnbc_feeds = {
+                "market": [
+                    "https://www.cnbc.com/id/20409666/device/rss/rss.html", # Market Insider
+                    "https://www.cnbc.com/id/15839069/device/rss/rss.html"  # Investing
+                ],
+                "finance": [
+                    "https://www.cnbc.com/id/10000664/device/rss/rss.html"  # Finance
+                ],
+                "business": [
+                    "https://www.cnbc.com/id/10001147/device/rss/rss.html"  # Business News
+                ],
+                "economy": [
+                    "https://www.cnbc.com/id/20910258/device/rss/rss.html"  # Economy
+                ],
+                "earnings": [
+                    "https://www.cnbc.com/id/15839135/device/rss/rss.html"  # Earnings
+                ],
+                "investing": [
+                    "https://www.cnbc.com/id/15839069/device/rss/rss.html"  # Investing
+                ]
+            }
+            
+            # Select feeds based on query
+            feeds_to_fetch = []
+            
+            # For ticker symbols, use market and investing feeds
+            if re.match(r'^[A-Za-z]+$', query) or re.match(r'^[A-Za-z]+\.[A-Za-z]+$', query):
+                feeds_to_fetch.extend(cnbc_feeds.get("market", []))
+                feeds_to_fetch.extend(cnbc_feeds.get("investing", []))
+            # For market query, use market and business feeds
+            elif query == "market":
+                feeds_to_fetch.extend(cnbc_feeds.get("market", []))
+                feeds_to_fetch.extend(cnbc_feeds.get("business", []))
+                feeds_to_fetch.extend(cnbc_feeds.get("economy", []))
+            # For categorized queries, use matching feeds if available
+            elif query.lower() in cnbc_feeds:
+                feeds_to_fetch.extend(cnbc_feeds.get(query.lower(), []))
+                
+            # Fetch articles from selected feeds
+            for feed_url in feeds_to_fetch:
+                articles = await self.fetch_from_rss_feed(feed_url, "CNBC")
+                all_articles.extend(articles)
+                
+            return all_articles
+        except Exception as e:
+            logger.error(f"Error fetching from CNBC RSS: {e}")
+            return []
+            
+    async def fetch_from_seeking_alpha_rss(self, query: str) -> List[Article]:
+        """Fetch news articles from Seeking Alpha RSS feeds."""
+        try:
+            # Seeking Alpha has different RSS feeds for different content
+            seeking_alpha_base_url = "https://seekingalpha.com/feed"
+            
+            if query == "market":
+                # Market news feed
+                feed_url = f"{seeking_alpha_base_url}/news/market"
+                return await self.fetch_from_rss_feed(feed_url, "Seeking Alpha")
+            elif re.match(r'^[A-Za-z]+$', query) or re.match(r'^[A-Za-z]+\.[A-Za-z]+$', query):
+                # Ticker-specific feed - only works for some major tickers
+                feed_url = f"{seeking_alpha_base_url}/stock/{query.upper()}"
+                return await self.fetch_from_rss_feed(feed_url, "Seeking Alpha")
+            else:
+                return []
+        except Exception as e:
+            logger.error(f"Error fetching from Seeking Alpha RSS: {e}")
+            return []
+            
+    async def fetch_from_marketwatch_rss(self, query: str) -> List[Article]:
+        """Fetch news articles from MarketWatch RSS feeds."""
+        try:
+            all_articles = []
+            
+            # MarketWatch RSS feeds by category
+            if query == "market" or query == "investing":
+                # Top Stories feed
+                feed_url = "https://feeds.marketwatch.com/marketwatch/topstories/"
+                articles = await self.fetch_from_rss_feed(feed_url, "MarketWatch")
+                all_articles.extend(articles)
+                
+                # MarketPulse feed (real-time updates)
+                feed_url = "https://feeds.marketwatch.com/marketwatch/marketpulse/"
+                articles = await self.fetch_from_rss_feed(feed_url, "MarketWatch")
+                all_articles.extend(articles)
+                
+            return all_articles
+        except Exception as e:
+            logger.error(f"Error fetching from MarketWatch RSS: {e}")
+            return []
+            
+    async def fetch_from_finnhub(self, query: str) -> List[Article]:
+        """Fetch news articles from Finnhub API based on query."""
+        if not USE_FINNHUB:
+            logger.warning("Finnhub API key not configured, skipping Finnhub source")
+            return []
+            
+        try:
+            # Use the rate limiter to respect Finnhub's API rate limits
+            async with self.rate_limiter:
+                articles = []
+                
+                # Calculate date range (last 7 days)
+                today = datetime.now()
+                from_date = (today - timedelta(days=7)).strftime("%Y-%m-%d")
+                to_date = today.strftime("%Y-%m-%d")
+                
+                # For tickers, use company_news endpoint
+                if re.match(r'^[A-Za-z]+$', query) or re.match(r'^[A-Za-z]+\.[A-Za-z]+$', query):
+                    # Use Finnhub's company news endpoint
+                    news_data = self.finnhub_client.company_news(query, _from=from_date, to=to_date)
+                    
+                    for item in news_data:
+                        title = item.get("headline", "")
+                        url = item.get("url", "")
+                        source = item.get("source", "Finnhub")
+                        timestamp = item.get("datetime", 0)
+                        if timestamp > 0:
+                            published_at = datetime.fromtimestamp(timestamp).strftime("%a, %d %b %Y %H:%M:%S +0000")
+                        else:
+                            published_at = ""
+                        summary = item.get("summary", "")
+                        
+                        article = Article(
+                            title=title,
+                            url=url,
+                            source=source,
+                            published_at=published_at,
+                            content=summary,
+                        )
+                        articles.append(article)
+                elif query == "market":
+                    # Get general market news for "market" query
+                    news_data = self.finnhub_client.general_news("general", min_id=0)
+                    
+                    for item in news_data:
+                        title = item.get("headline", "")
+                        url = item.get("url", "")
+                        source = item.get("source", "Finnhub")
+                        timestamp = item.get("datetime", 0)
+                        if timestamp > 0:
+                            published_at = datetime.fromtimestamp(timestamp).strftime("%a, %d %b %Y %H:%M:%S +0000")
+                        else:
+                            published_at = ""
+                        summary = item.get("summary", "")
+                        
+                        article = Article(
+                            title=title,
+                            url=url,
+                            source=source,
+                            published_at=published_at,
+                            content=summary,
+                        )
+                        articles.append(article)
+                else:
+                    # Skip non-ticker, non-market queries
+                    pass
+                    
+                await asyncio.sleep(1.0)  # Rate limiting
+                return articles
+                
+        except Exception as e:
+            logger.error(f"Error fetching from Finnhub API: {e}")
+            return []
+
     async def fetch_news(self, queries: List[str]) -> List[Article]:
         """Fetch news from all sources based on queries."""
         all_articles: Set[Article] = set()
-        for query in queries:
-            articles = await self.fetch_from_newsapi(query)
-            all_articles.update(articles)
+        
+        # Add a special query for general market news
+        all_queries = queries.copy()
+        if "market" not in all_queries:
+            all_queries.append("market")
+        
+        # Add some financial categories that might be useful
+        financial_categories = ["finance", "investing", "business", "economy", "earnings"]
+        for category in financial_categories:
+            if category not in all_queries:
+                all_queries.append(category)
+        
+        # Track if we have any sources configured
+        sources_available = USE_NEWSAPI or USE_FINNHUB or True  # RSS feeds are always available
+        if not sources_available:
+            logger.error("No news sources configured. Check your API keys.")
+            
+        for query in all_queries:
+            # First try all the free RSS feed sources
+            yahoo_articles = await self.fetch_from_yahoo_finance_rss(query)
+            all_articles.update(yahoo_articles)
+            
+            cnbc_articles = await self.fetch_from_cnbc_rss(query)
+            all_articles.update(cnbc_articles)
+            
+            seeking_alpha_articles = await self.fetch_from_seeking_alpha_rss(query)
+            all_articles.update(seeking_alpha_articles)
+            
+            marketwatch_articles = await self.fetch_from_marketwatch_rss(query)
+            all_articles.update(marketwatch_articles)
+            
+            # Then try paid API sources if configured
+            if USE_NEWSAPI:
+                newsapi_articles = await self.fetch_from_newsapi(query)
+                all_articles.update(newsapi_articles)
+                
+            if USE_FINNHUB:
+                finnhub_articles = await self.fetch_from_finnhub(query)
+                all_articles.update(finnhub_articles)
 
         # Convert to list and sort by published date (descending)
         return sorted(
@@ -180,13 +465,16 @@ class NewsSummarizer:
                 truncated_text = self._truncate_text(article.content)
                 prompt = f"""You are a top-tier financial journalist. Summarize the following article for a busy investment banker:
 {truncated_text}
-Return JSON with keys: "headline", "summary_bullets", "why_it_matters"."""
+Return JSON with keys: "headline", "summary_bullets", "why_it_matters", "sentiment", "sentiment_score".
+
+For sentiment, use one of: "positive", "negative", "neutral".
+For sentiment_score, use a scale from -1.0 (very negative) to 1.0 (very positive), with 0.0 being neutral."""
 
                 response = await openai.ChatCompletion.acreate(
                     model=self.model,
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.5,
-                    max_tokens=300,
+                    max_tokens=350,
                 )
 
                 # Parse the response
@@ -198,6 +486,8 @@ Return JSON with keys: "headline", "summary_bullets", "why_it_matters"."""
                     summary_data = json.loads(content)
                     article.summarized_headline = summary_data.get("headline", "")
                     article.summary_bullets = summary_data.get("summary_bullets", [])
+                    article.sentiment = summary_data.get("sentiment", "neutral")
+                    article.sentiment_score = summary_data.get("sentiment_score", 0.0)
                     if isinstance(article.summary_bullets, str):
                         # Handle if bullets are returned as a string
                         article.summary_bullets = [
@@ -249,7 +539,19 @@ class NewsOutputter:
 
     def _format_article_markdown(self, article: Article) -> str:
         """Format an article for markdown output."""
-        md = f"## [{article.summarized_headline or article.title}]({article.url})\n"
+        # Add sentiment emoji based on sentiment
+        sentiment_emoji = "🟡" # neutral/yellow circle
+        if article.sentiment == "positive":
+            sentiment_emoji = "🟢" # green circle
+        elif article.sentiment == "negative":
+            sentiment_emoji = "🔴" # red circle
+        
+        sentiment_info = ""
+        if article.sentiment:
+            score = f" ({article.sentiment_score:.1f})" if article.sentiment_score is not None else ""
+            sentiment_info = f" {sentiment_emoji} **{article.sentiment.upper()}**{score}"
+            
+        md = f"## [{article.summarized_headline or article.title}]({article.url}){sentiment_info}\n"
         md += f"*Source: {article.source}*\n\n"
         for bullet in article.summary_bullets:
             md += f"* {bullet}\n"
@@ -259,9 +561,21 @@ class NewsOutputter:
 
     def _format_article_console(self, article: Article) -> None:
         """Format an article for console output with colors."""
+        # Set sentiment color
+        sentiment_color = "yellow"
+        if article.sentiment == "positive":
+            sentiment_color = "green"
+        elif article.sentiment == "negative":
+            sentiment_color = "red"
+            
+        sentiment_display = ""
+        if article.sentiment:
+            score = f" ({article.sentiment_score:.1f})" if article.sentiment_score is not None else ""
+            sentiment_display = f"\n[bold {sentiment_color}]{article.sentiment.upper()}{score}[/bold {sentiment_color}]"
+        
         self.console.print(
             Panel(
-                f"[cyan]{article.summarized_headline or article.title}[/cyan]\n"
+                f"[cyan]{article.summarized_headline or article.title}[/cyan]{sentiment_display}\n"
                 f"[dim]{article.source} • {article.published_at}[/dim]\n"
                 f"[link={article.url}]{article.url}[/link]\n\n"
                 + "\n".join(f"[white]• {bullet}[/white]" for bullet in article.summary_bullets)
