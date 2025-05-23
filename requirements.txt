@@ -1,8 +1,42 @@
 aiohttp==3.9.1
 python-dotenv==1.0.0
-openai==1.2.3
+openai==1.51.0
 rich==13.5.2
 tiktoken==0.5.1
 pyyaml==6.0.1
 feedparser==6.0.10
 finnhub-python==2.4.23
+
+# Enhanced dependencies for better functionality
+click==8.1.7
+asyncio-throttle==1.0.2
+aiofiles==23.2.1
+cachetools==5.3.2
+redis==5.0.1
+pymongo==4.6.0
+python-dateutil==2.8.2
+schedule==1.2.0
+requests==2.31.0
+
+# Data analysis and visualization
+pandas==2.1.4
+numpy==1.24.3
+matplotlib==3.8.2
+seaborn==0.13.0
+plotly==5.17.0
+
+# Text processing and NLP
+textblob==0.17.1
+fuzzywuzzy==0.18.0
+python-levenshtein==0.23.0
+
+# Utilities
+tqdm==4.66.1
+colorlog==6.8.0
+python-crontab==3.0.0
+httpx==0.26.0
+
+# Optional for advanced features
+streamlit==1.29.0
+fastapi==0.104.1
+uvicorn==0.24.0

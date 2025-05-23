@@ -5,6 +5,8 @@ queries:
   - AAPL
   - MSFT
   - GOOGL
+  - NVDA
+  - TSLA
   - "artificial intelligence"
   - "federal reserve"
   - "interest rates"
@@ -12,3 +14,74 @@ queries:
   - "S&P 500"
   - "NASDAQ"
   - "inflation"
+  - "cryptocurrency"
+  - "bitcoin"
+  - "earnings"
+
+# AI Model Configuration
+ai:
+  model: "gpt-4o-mini"  # More cost-effective than gpt-4o
+  temperature: 0.3
+  max_tokens: 500
+  backup_model: "gpt-3.5-turbo"
+  
+# Data Sources Configuration
+data_sources:
+  newsapi:
+    enabled: true
+    page_size: 50
+  finnhub:
+    enabled: true
+  rss_feeds:
+    enabled: true
+    sources:
+      - name: "Yahoo Finance"
+        enabled: true
+      - name: "CNBC"
+        enabled: true
+      - name: "MarketWatch"
+        enabled: true
+      - name: "Seeking Alpha"
+        enabled: true
+      - name: "Reuters"
+        enabled: true
+      - name: "Bloomberg"
+        enabled: true
+
+# Output Configuration
+output:
+  console: true
+  markdown: true
+  email: false
+  json: true
+  slack: false
+  discord: false
+  
+# Processing Configuration
+processing:
+  max_articles: 25
+  concurrent_requests: 5
+  cache_duration_hours: 2
+  dedupe_similarity_threshold: 0.8
+  
+# Analysis Configuration
+analysis:
+  sentiment_analysis: true
+  market_impact_scoring: true
+  trending_topics: true
+  portfolio_relevance: true
+  
+# Scheduling (for automated runs)
+scheduling:
+  enabled: false
+  cron_expression: "0 9,15,21 * * 1-5"  # 9am, 3pm, 9pm on weekdays
+  
+# Filtering Configuration  
+filters:
+  min_article_length: 100
+  exclude_keywords:
+    - "advertisement"
+    - "sponsored"
+    - "promotion"
+  include_only_business_hours: false
+  max_age_hours: 48
