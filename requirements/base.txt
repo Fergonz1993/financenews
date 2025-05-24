@@ -1,0 +1,33 @@
+# Core Financial News AI Dependencies
+# Essential packages for basic functionality
+
+# Core API and Processing
+openai>=1.3.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+pandas>=2.1.0
+numpy>=1.24.0
+
+# Real-time Streaming
+websockets>=12.0
+websocket-client>=1.7.0
+aiohttp>=3.9.0
+redis>=5.0.0
+
+# Configuration and CLI
+pydantic>=2.4.0
+click>=8.1.0
+rich>=13.6.0
+PyYAML>=6.0.1
+
+# Basic ML/NLP
+transformers>=4.35.0
+torch>=2.1.0
+
+# API Server
+fastapi>=0.104.0
+uvicorn>=0.24.0
+
+# Data Processing
+polars>=0.20.0
+pyarrow>=14.0.0 

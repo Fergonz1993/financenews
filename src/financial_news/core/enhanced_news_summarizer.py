@@ -82,13 +82,7 @@ def setup_logging():
 logger = setup_logging()
 
 # Enhanced configuration class
-class Config:
-    """Enhanced configuration management."""
-    
-    def __init__(self, config_path: str = "config.yaml"):
-        self.config_path = Path(config_path)
-        self.config = self._load_config()
-        self._validate_config()
+class Config:    """Enhanced configuration management."""        def __init__(self, config_path: str = "config/config.yaml"):        self.config_path = Path(config_path)        self.config = self._load_config()        self._validate_config()
     
     def _load_config(self) -> Dict:
         """Load configuration from YAML file."""
