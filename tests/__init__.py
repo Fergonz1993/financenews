@@ -1,0 +1,1 @@
+"""Test suite for Financial News application.""" 

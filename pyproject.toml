@@ -1,126 +1,287 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "financial-news-ai"
+name = "financial-news-summarizer"
 version = "2.0.0"
-description = "AI-powered Financial News Analysis with Real-time Streaming"
-authors = [
-    {name = "Financial News AI Team", email = "team@financialnews.ai"}
-]
+description = "AI-powered financial news analysis and summarization tool with real-time capabilities"
+readme = "README.md"
 license = {text = "MIT"}
-readme = "docs/README.md"
-requires-python = ">=3.8"
-keywords = ["finance", "news", "ai", "sentiment-analysis", "real-time"]
+authors = [
+    {name = "Your Name", email = "your.email@example.com"}
+]
+maintainers = [
+    {name = "Your Name", email = "your.email@example.com"}
+]
+keywords = ["finance", "news", "ai", "summarization", "analysis", "real-time"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Financial and Insurance Industry",
+    "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Topic :: Office/Business :: Financial",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Text Processing :: Linguistic",
 ]
-
+requires-python = ">=3.10"
 dependencies = [
-    "openai>=1.3.0",
-    "websocket-client>=1.7.0",
-    "websockets>=12.0",
-    "fastapi>=0.104.0",
-    "uvicorn>=0.24.0",
-    "rich>=13.6.0",
-    "aiohttp>=3.9.0",
-    "pandas>=2.1.0",
-    "numpy>=1.24.0",
-    "redis>=5.0.0",
+    # Core dependencies
+    "aiohttp>=3.9.1",
     "python-dotenv>=1.0.0",
-    "pydantic>=2.4.0",
-    "PyYAML>=6.0.1",
-    "requests>=2.31.0"
+    "openai>=1.51.0",
+    "rich>=13.5.2",
+    "tiktoken>=0.5.1",
+    "pyyaml>=6.0.1",
+    "feedparser>=6.0.10",
+    "finnhub-python>=2.4.23",
+    
+    # Enhanced functionality
+    "click>=8.1.7",
+    "asyncio-throttle>=1.0.2",
+    "aiofiles>=23.2.1",
+    "cachetools>=5.3.2",
+    "redis>=5.0.1",
+    "python-dateutil>=2.8.2",
+    "requests>=2.31.0",
+    
+    # Data analysis
+    "pandas>=2.1.4",
+    "numpy>=1.24.3",
+    "matplotlib>=3.8.2",
+    "seaborn>=0.13.0",
+    
+    # Text processing
+    "textblob>=0.17.1",
+    "fuzzywuzzy>=0.18.0",
+    "python-levenshtein>=0.23.0",
+    
+    # Utilities
+    "tqdm>=4.66.1",
+    "colorlog>=6.8.0",
+    "httpx>=0.26.0",
 ]
 
 [project.optional-dependencies]
+ai = [
+    "torch>=2.0.0",
+    "transformers>=4.30.0",
+    "sentence-transformers>=2.2.0",
+    "scikit-learn>=1.3.0",
+]
+multimedia = [
+    "opencv-python>=4.8.0",
+    "Pillow>=10.0.0",
+    "librosa>=0.10.0",
+    "SpeechRecognition>=3.10.0",
+    "moviepy>=1.0.3",
+    "whisper>=1.0.0",
+    "yt-dlp>=2023.7.6",
+]
+web = [
+    "streamlit>=1.29.0",
+    "fastapi>=0.104.1",
+    "uvicorn>=0.24.0",
+]
+realtime = [
+    "websockets>=11.0.0",
+    "aiokafka>=0.8.0",
+    "asyncio-mqtt>=0.13.0",
+]
+graph = [
+    "torch-geometric>=2.3.0",
+    "networkx>=3.1.0",
+]
 dev = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.21.0",
-    "pytest-mock>=3.12.0",
     "pytest-cov>=4.1.0",
-    "black>=23.9.0",
-    "flake8>=6.1.0",
-    "mypy>=1.6.0",
-    "pre-commit>=3.5.0",
-    "bandit>=1.7.0"
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.5.0",
+    "pre-commit>=3.0.0",
 ]
-ml = [
-    "torch>=2.1.0",
-    "torch-geometric>=2.4.0",
-    "transformers>=4.35.0",
-    "scikit-learn>=1.3.0",
-    "librosa>=0.10.1",
-    "opencv-python>=4.8.0"
+all = [
+    "financial-news-summarizer[ai,multimedia,web,realtime,graph]"
 ]
-full = [
-    "financial-news-ai[dev,ml]",
-]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/financial-news-summarizer"
+Documentation = "https://github.com/yourusername/financial-news-summarizer#readme"
+Repository = "https://github.com/yourusername/financial-news-summarizer"
+Issues = "https://github.com/yourusername/financial-news-summarizer/issues"
 
 [project.scripts]
 financial-news = "financial_news.cli:main"
 
-[project.urls]
-Homepage = "https://github.com/yourusername/financial-news-ai"
-Documentation = "https://financial-news-ai.readthedocs.io"
-Repository = "https://github.com/yourusername/financial-news-ai.git"
-Issues = "https://github.com/yourusername/financial-news-ai/issues"
+[tool.setuptools.packages.find]
+where = ["src"]
 
+[tool.setuptools.package-data]
+"financial_news" = ["config/*.yaml", "templates/*.html"]
+
+# Black configuration
 [tool.black]
 line-length = 88
-target-version = ['py38']
+target-version = ['py310', 'py311', 'py312']
 include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
 
+# Ruff configuration (replaces flake8, isort, and more)
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+    "C4", # flake8-comprehensions
+    "UP", # pyupgrade
+    "ARG001", # unused-function-args
+    "SIM", # flake8-simplify
+    "TCH", # flake8-type-checking
+    "TID", # flake8-tidy-imports
+    "Q", # flake8-quotes
+    "FLY", # flynt
+    "PERF", # perflint
+    "RUF", # ruff-specific rules
+]
+ignore = [
+    "E501",  # line too long, handled by black
+    "B008",  # do not perform function calls in argument defaults
+    "C901",  # too complex
+    "W191",  # indentation contains tabs
+]
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "venv",
+]
+
+[tool.ruff.per-file-ignores]
+"__init__.py" = ["F401"]
+"tests/**/*" = ["ARG001", "S101"]
+
+[tool.ruff.isort]
+known-first-party = ["financial_news"]
+force-sort-within-sections = true
+
+# MyPy configuration
 [tool.mypy]
-python_version = "3.8"
+python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
+disallow_incomplete_defs = true
 check_untyped_defs = true
+disallow_untyped_decorators = true
 no_implicit_optional = true
 warn_redundant_casts = true
 warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+show_error_codes = true
 
 [[tool.mypy.overrides]]
 module = [
-    "websocket.*",
-    "redis.*",
-    "transformers.*"
+    "finnhub.*",
+    "feedparser.*",
+    "textblob.*",
+    "fuzzywuzzy.*",
+    "tiktoken.*",
+    "cv2.*",
+    "librosa.*",
+    "speech_recognition.*",
+    "moviepy.*",
+    "whisper.*",
+    "yt_dlp.*",
+    "torch_geometric.*",
+    "asyncio_throttle.*",
+    "asyncio_mqtt.*",
 ]
 ignore_missing_imports = true
 
+# Pytest configuration
 [tool.pytest.ini_options]
-testpaths = ["tests"]
-python_files = ["test_*.py", "*_test.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
+minversion = "7.0"
 addopts = [
     "--strict-markers",
     "--strict-config",
-    "--verbose",
-    "-ra"
+    "--cov=financial_news",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+    "--cov-report=xml",
+]
+testpaths = ["tests"]
+filterwarnings = [
+    "error",
+    "ignore::UserWarning",
+    "ignore::DeprecationWarning",
 ]
 markers = [
-    "slow: marks tests as slow",
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
-    "unit: marks tests as unit tests"
+    "unit: marks tests as unit tests",
 ]
-asyncio_mode = "auto"
 
+# Coverage configuration
 [tool.coverage.run]
 source = ["src"]
+branch = true
 omit = [
     "*/tests/*",
-    "*/venv/*",
-    "*/__pycache__/*"
+    "*/test_*",
+    "*/__init__.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
 ] 
