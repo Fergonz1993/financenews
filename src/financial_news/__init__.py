@@ -24,16 +24,16 @@ __author__ = "Financial News Team"
 __email__ = "team@financialnews.com"
 
 # Import main components for easy access
-from .config.settings import get_settings, Settings
-from .config.logging import setup_logging, get_logger
+from .config.logging import get_logger, setup_logging
+from .config.settings import Settings, get_settings
 
 # Package metadata
 __all__ = [
-    "__version__",
-    "__author__", 
-    "__email__",
-    "get_settings",
     "Settings",
-    "setup_logging",
+    "__author__",
+    "__email__",
+    "__version__",
     "get_logger",
+    "get_settings",
+    "setup_logging",
 ]

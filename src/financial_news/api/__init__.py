@@ -1,1 +1,1 @@
-"""Web API layer for Financial News application.""" 
+"""Web API layer for Financial News application."""

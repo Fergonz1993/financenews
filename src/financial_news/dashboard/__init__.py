@@ -1,1 +1,1 @@
-"""Dashboard components and UI for Financial News.""" 
+"""Dashboard components and UI for Financial News."""

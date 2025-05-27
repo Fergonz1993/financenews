@@ -1,1 +1,1 @@
-"""API route handlers for Financial News endpoints.""" 
+"""API route handlers for Financial News endpoints."""

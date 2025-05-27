@@ -1,1 +1,1 @@
-"""External services and API integrations for Financial News.""" 
+"""External services and API integrations for Financial News."""

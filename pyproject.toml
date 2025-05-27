@@ -148,6 +148,8 @@ extend-exclude = '''
 [tool.ruff]
 target-version = "py310"
 line-length = 88
+
+[tool.ruff.lint]
 select = [
     "E",  # pycodestyle errors
     "W",  # pycodestyle warnings
@@ -195,13 +197,9 @@ exclude = [
     "venv",
 ]
 
-[tool.ruff.per-file-ignores]
+[tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
 "tests/**/*" = ["ARG001", "S101"]
-
-[tool.ruff.isort]
-known-first-party = ["financial_news"]
-force-sort-within-sections = true
 
 # MyPy configuration
 [tool.mypy]
@@ -218,44 +216,29 @@ warn_unused_ignores = true
 warn_no_return = true
 warn_unreachable = true
 strict_equality = true
-show_error_codes = true
 
 [[tool.mypy.overrides]]
 module = [
-    "finnhub.*",
     "feedparser.*",
+    "finnhub.*",
     "textblob.*",
     "fuzzywuzzy.*",
-    "tiktoken.*",
-    "cv2.*",
-    "librosa.*",
-    "speech_recognition.*",
-    "moviepy.*",
-    "whisper.*",
-    "yt_dlp.*",
-    "torch_geometric.*",
+    "colorlog.*",
     "asyncio_throttle.*",
-    "asyncio_mqtt.*",
+    "cachetools.*",
+    "redis.*",
+    "tiktoken.*",
 ]
 ignore_missing_imports = true
 
 # Pytest configuration
 [tool.pytest.ini_options]
-minversion = "7.0"
-addopts = [
-    "--strict-markers",
-    "--strict-config",
-    "--cov=financial_news",
-    "--cov-report=term-missing",
-    "--cov-report=html",
-    "--cov-report=xml",
-]
+minversion = "6.0"
+addopts = "-ra -q --strict-markers --strict-config"
 testpaths = ["tests"]
-filterwarnings = [
-    "error",
-    "ignore::UserWarning",
-    "ignore::DeprecationWarning",
-]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
@@ -265,11 +248,12 @@ markers = [
 # Coverage configuration
 [tool.coverage.run]
 source = ["src"]
-branch = true
 omit = [
     "*/tests/*",
     "*/test_*",
-    "*/__init__.py",
+    "*/__pycache__/*",
+    "*/venv/*",
+    "*/env/*",
 ]
 
 [tool.coverage.report]

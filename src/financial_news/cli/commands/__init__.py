@@ -1,1 +1,1 @@
-"""Command-line interface commands for Financial News.""" 
+"""Command-line interface commands for Financial News."""
