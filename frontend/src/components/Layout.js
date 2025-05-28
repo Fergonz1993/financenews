@@ -34,8 +34,11 @@ import {
   Brightness4 as DarkModeIcon,
   Brightness7 as LightModeIcon,
   Notifications as NotificationIcon,
+  Bookmark as BookmarkIcon,
 } from '@mui/icons-material';
 import { getUserSettings } from '../api/newsApi';
+import SearchBar from './SearchBar';
+import NotificationCenter from './NotificationCenter';
 
 // Drawer width
 const drawerWidth = 240;
@@ -61,6 +64,7 @@ const Layout = ({ children, setDarkMode }) => {
   const menuItems = [
     { text: 'Home', path: '/', icon: <HomeIcon /> },
     { text: 'Analytics', path: '/analytics', icon: <AnalyticsIcon /> },
+    { text: 'Saved Articles', path: '/saved', icon: <BookmarkIcon /> },
     { text: 'Tools', path: '/tools', icon: <ToolsIcon /> },
     { text: 'Settings', path: '/settings', icon: <SettingsIcon /> },
     { text: 'Documentation', path: '/docs', icon: <InfoIcon /> },
@@ -130,21 +134,20 @@ const Layout = ({ children, setDarkMode }) => {
             />
           </Box>
           
-          {/* Notification icon */}
-          <Tooltip title="Notifications">
-            <IconButton color="inherit">
-              <Badge badgeContent={3} color="secondary">
-                <NotificationIcon />
-              </Badge>
-            </IconButton>
-          </Tooltip>
+          {/* Notification Center */}
+          <NotificationCenter />
           
-          {/* Search icon */}
-          <Tooltip title="Search">
-            <IconButton color="inherit" onClick={() => navigate('/')}>
-              <SearchIcon />
-            </IconButton>
-          </Tooltip>
+          {/* Hide search bar on small screens, show icon instead */}
+          <Box sx={{ display: { xs: 'none', md: 'block' }, width: '50%', mx: 2 }}>
+            <SearchBar />
+          </Box>
+          <Box sx={{ display: { xs: 'block', md: 'none' } }}>
+            <Tooltip title="Search">
+              <IconButton color="inherit" onClick={() => navigate('/')}>
+                <SearchIcon />
+              </IconButton>
+            </Tooltip>
+          </Box>
         </Toolbar>
       </AppBar>
       <Box

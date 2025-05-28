@@ -94,6 +94,47 @@ export const updateUserSettings = async (settings) => {
   }
 };
 
+// API functions for saved articles
+export const getSavedArticles = async (userId) => {
+  try {
+    const response = await api.get(`/users/${userId}/saved-articles`);
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching saved articles:', error);
+    throw error;
+  }
+};
+
+export const saveArticle = async (userId, articleId) => {
+  try {
+    const response = await api.post(`/users/${userId}/saved-articles/${articleId}`);
+    return response.data;
+  } catch (error) {
+    console.error(`Error saving article ${articleId}:`, error);
+    throw error;
+  }
+};
+
+export const unsaveArticle = async (userId, articleId) => {
+  try {
+    const response = await api.delete(`/users/${userId}/saved-articles/${articleId}`);
+    return response.data;
+  } catch (error) {
+    console.error(`Error unsaving article ${articleId}:`, error);
+    throw error;
+  }
+};
+
+export const checkArticleSavedStatus = async (userId, articleId) => {
+  try {
+    const response = await api.get(`/users/${userId}/saved-articles/${articleId}/status`);
+    return response.data.is_saved;
+  } catch (error) {
+    console.error(`Error checking saved status for article ${articleId}:`, error);
+    return false;
+  }
+};
+
 export default {
   getArticles,
   getArticleById,
@@ -103,4 +144,8 @@ export default {
   analyzeSentiment,
   getUserSettings,
   updateUserSettings,
+  getSavedArticles,
+  saveArticle,
+  unsaveArticle,
+  checkArticleSavedStatus,
 };

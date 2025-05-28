@@ -9,9 +9,14 @@ import ArticleDetail from './pages/ArticleDetail';
 import Analytics from './pages/Analytics';
 import Tools from './pages/Tools';
 import Settings from './pages/Settings';
+import SentimentDashboard from './pages/SentimentDashboard';
+import SavedArticles from './pages/SavedArticles';
 
 // Import API functions
 import { getUserSettings } from './api/newsApi';
+
+// Import context providers
+import { NotificationProvider } from './context/NotificationContext';
 
 // Import components
 import Layout from './components/Layout';
@@ -78,17 +83,21 @@ function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <Router>
-        <Layout setDarkMode={setDarkMode}>
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/articles/:id" element={<ArticleDetail />} />
-            <Route path="/analytics" element={<Analytics />} />
-            <Route path="/tools" element={<Tools />} />
-            <Route path="/settings" element={<Settings />} />
-          </Routes>
-        </Layout>
-      </Router>
+      <NotificationProvider>
+        <Router>
+          <Layout setDarkMode={setDarkMode}>
+            <Routes>
+              <Route path="/" element={<Home />} />
+              <Route path="/articles/:id" element={<ArticleDetail />} />
+              <Route path="/analytics" element={<Analytics />} />
+              <Route path="/tools" element={<Tools />} />
+              <Route path="/settings" element={<Settings />} />
+              <Route path="/sentiment" element={<SentimentDashboard />} />
+              <Route path="/saved" element={<SavedArticles />} />
+            </Routes>
+          </Layout>
+        </Router>
+      </NotificationProvider>
     </ThemeProvider>
   );
 }

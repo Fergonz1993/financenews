@@ -23,6 +23,7 @@ import {
   TrendingFlat,
 } from '@mui/icons-material';
 import { getArticles, getSources, getTopics } from '../api/newsApi';
+import MarketDataWidget from '../components/MarketDataWidget';
 
 const Home = () => {
   // State for articles and loading
@@ -114,9 +115,17 @@ const Home = () => {
         Financial News
       </Typography>
       
-      {/* Filters */}
-      <Paper sx={{ p: 2, mb: 3 }}>
-        <Grid container spacing={2}>
+      {/* Market Data and Filters Row */}
+      <Grid container spacing={3} sx={{ mb: 3 }}>
+        {/* Market Data Widget */}
+        <Grid item xs={12} md={4} lg={3}>
+          <MarketDataWidget />
+        </Grid>
+        
+        {/* Filters */}
+        <Grid item xs={12} md={8} lg={9}>
+          <Paper sx={{ p: 2, mb: 3 }}>
+            <Grid container spacing={2}>
           <Grid item xs={12} md={6}>
             <TextField
               fullWidth
@@ -182,8 +191,10 @@ const Home = () => {
               </Select>
             </FormControl>
           </Grid>
+            </Grid>
+          </Paper>
         </Grid>
-      </Paper>
+      </Grid>
       
       {/* Error message */}
       {error && (

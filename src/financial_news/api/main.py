@@ -5,11 +5,13 @@ FastAPI backend for the Financial News Analysis Platform.
 """
 
 import os
+import asyncio
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Query, Depends
+from fastapi import FastAPI, HTTPException, Query, Depends, WebSocket, WebSocketDisconnect, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -19,6 +21,8 @@ from financial_news.config.settings import get_settings
 from financial_news.models.article import Article
 from financial_news.core.summarizer_config import Config, setup_logging
 from financial_news.core.sentiment import analyze_article_sentiment, get_sentiment_analyzer
+from financial_news.api.websockets import manager as notification_manager, generate_demo_alerts
+from financial_news.api.saved_articles import save_article, unsave_article, get_saved_articles, is_article_saved
 
 # Set up logging
 logger = setup_logging()
@@ -170,12 +174,18 @@ async def get_articles(
 
 
 @app.get("/api/articles/{article_id}", response_model=ArticleResponse)
-async def get_article(article_id: str):
+async def get_article(article_id: str, user_id: Optional[str] = None):
     """Get a specific article by ID."""
     articles = get_mock_articles()
     for article in articles:
         if article.id == article_id:
-            return ArticleResponse(**article.to_dict())
+            article_data = article.to_dict()
+            
+            # Add saved status if user_id is provided
+            if user_id:
+                article_data["is_saved"] = is_article_saved(user_id, article_id)
+            
+            return ArticleResponse(**article_data)
     
     raise HTTPException(status_code=404, detail="Article not found")
 
@@ -292,6 +302,106 @@ async def update_user_settings(settings: Dict):
         "message": "Settings updated successfully",
         "settings": settings
     }
+
+
+@app.websocket("/ws/notifications")
+async def websocket_endpoint(websocket: WebSocket):
+    connection_id = str(uuid.uuid4())
+    await notification_manager.connect(websocket, connection_id)
+    
+    try:
+        while True:
+            # Wait for messages from the client
+            data = await websocket.receive_text()
+            # You can process client messages here if needed
+    except WebSocketDisconnect:
+        notification_manager.disconnect(connection_id)
+
+
+@app.websocket("/ws/notifications/{user_id}")
+async def user_websocket_endpoint(websocket: WebSocket, user_id: str):
+    connection_id = str(uuid.uuid4())
+    await notification_manager.connect(websocket, connection_id, user_id)
+    
+    try:
+        while True:
+            # Wait for messages from the client
+            data = await websocket.receive_text()
+            # You can process client messages here if needed
+    except WebSocketDisconnect:
+        notification_manager.disconnect(connection_id, user_id)
+
+
+@app.post("/api/notifications/send")
+async def send_notification(data: Dict):
+    """Send a notification to all connected clients or specific users."""
+    if "type" not in data:
+        raise HTTPException(status_code=400, detail="Notification type is required")
+        
+    if data["type"] == "market_alert" and "alert" in data:
+        await notification_manager.broadcast_market_alert(data["alert"])
+    elif data["type"] == "news_update" and "news" in data:
+        await notification_manager.broadcast_news_update(data["news"])
+    elif data["type"] == "user_notification" and "user_id" in data and "message" in data:
+        await notification_manager.send_to_user(data["message"], data["user_id"])
+    else:
+        raise HTTPException(status_code=400, detail="Invalid notification format")
+        
+    return {"status": "success", "message": "Notification sent"}
+
+
+# Saved Articles Endpoints
+@app.post("/api/users/{user_id}/saved-articles/{article_id}")
+async def save_article_endpoint(user_id: str, article_id: str):
+    """Save an article for a user."""
+    # Get the article data
+    articles = get_mock_articles()
+    article = next((a for a in articles if a.id == article_id), None)
+    
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+    
+    # Save the article
+    result = save_article(user_id, article_id, article.to_dict())
+    
+    if result["status"] == "error":
+        raise HTTPException(status_code=500, detail=result["message"])
+    
+    return result
+
+
+@app.delete("/api/users/{user_id}/saved-articles/{article_id}")
+async def unsave_article_endpoint(user_id: str, article_id: str):
+    """Remove an article from a user's saved articles."""
+    result = unsave_article(user_id, article_id)
+    
+    if result["status"] == "error" and "not found" in result["message"]:
+        raise HTTPException(status_code=404, detail=result["message"])
+    elif result["status"] == "error":
+        raise HTTPException(status_code=500, detail=result["message"])
+    
+    return result
+
+
+@app.get("/api/users/{user_id}/saved-articles")
+async def get_saved_articles_endpoint(user_id: str):
+    """Get all saved articles for a user."""
+    articles = get_saved_articles(user_id)
+    return articles
+
+
+@app.get("/api/users/{user_id}/saved-articles/{article_id}/status")
+async def check_article_saved_status(user_id: str, article_id: str):
+    """Check if an article is saved by a user."""
+    is_saved = is_article_saved(user_id, article_id)
+    return {"is_saved": is_saved}
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Start background tasks when the API starts."""
+    # Start demo alerts generation in background (for demonstration purposes)
+    asyncio.create_task(generate_demo_alerts())
 
 
 if __name__ == "__main__":
