@@ -38,14 +38,14 @@ app = FastAPI(
 )
 
 # Add CORS middleware to allow requests from the React frontend
+# Add CORS middleware to allow requests from the React frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific origins
+    allow_origins=["http://localhost:3000"],  # In production, replace with your deployed frontend URL(s)
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 # Define API models
 class ArticleResponse(BaseModel):
