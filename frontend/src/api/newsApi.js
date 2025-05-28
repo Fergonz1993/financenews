@@ -62,10 +62,45 @@ export const getTopics = async () => {
   }
 };
 
+// API functions for sentiment analysis
+export const analyzeSentiment = async (text) => {
+  try {
+    const response = await api.post('/analyze/sentiment', { text });
+    return response.data;
+  } catch (error) {
+    console.error('Error analyzing sentiment:', error);
+    throw error;
+  }
+};
+
+// API functions for user settings
+export const getUserSettings = async () => {
+  try {
+    const response = await api.get('/user/settings');
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching user settings:', error);
+    throw error;
+  }
+};
+
+export const updateUserSettings = async (settings) => {
+  try {
+    const response = await api.post('/user/settings', settings);
+    return response.data;
+  } catch (error) {
+    console.error('Error updating user settings:', error);
+    throw error;
+  }
+};
+
 export default {
   getArticles,
   getArticleById,
   getAnalytics,
   getSources,
   getTopics,
+  analyzeSentiment,
+  getUserSettings,
+  updateUserSettings,
 };

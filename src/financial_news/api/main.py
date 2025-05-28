@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from financial_news.config.settings import get_settings
 from financial_news.models.article import Article
 from financial_news.core.summarizer_config import Config, setup_logging
+from financial_news.core.sentiment import analyze_article_sentiment, get_sentiment_analyzer
 
 # Set up logging
 logger = setup_logging()
@@ -126,8 +127,11 @@ async def get_articles(
     source: Optional[str] = None,
     sentiment: Optional[str] = None,
     topic: Optional[str] = None,
+    search: Optional[str] = None,
+    sort_by: Optional[str] = Query(None, enum=["date", "relevance", "sentiment"]),
+    sort_order: Optional[str] = Query("desc", enum=["asc", "desc"]),
 ):
-    """Get articles with optional filtering."""
+    """Get articles with optional filtering and sorting."""
     # In a real implementation, this would fetch from a database
     articles = get_mock_articles()
     
@@ -138,6 +142,26 @@ async def get_articles(
         articles = [a for a in articles if a.sentiment == sentiment]
     if topic:
         articles = [a for a in articles if topic in a.topics]
+    
+    # Apply search
+    if search:
+        search_lower = search.lower()
+        articles = [a for a in articles if 
+                    search_lower in a.title.lower() or 
+                    search_lower in a.content.lower() or
+                    any(search_lower in entity.lower() for entity in a.key_entities) or
+                    any(search_lower in topic.lower() for topic in a.topics)]
+    
+    # Apply sorting
+    if sort_by:
+        reverse = sort_order.lower() == "desc"
+        if sort_by == "date":
+            articles = sorted(articles, key=lambda a: a.published_at, reverse=reverse)
+        elif sort_by == "relevance":
+            # For relevance, we'd need a real scoring algorithm, but for mock data we'll use the market impact
+            articles = sorted(articles, key=lambda a: a.market_impact_score or 0, reverse=reverse)
+        elif sort_by == "sentiment":
+            articles = sorted(articles, key=lambda a: a.sentiment_score or 0, reverse=reverse)
     
     # Apply limit
     articles = articles[:limit]
@@ -219,6 +243,55 @@ async def get_topics():
         {"id": "earnings", "name": "Earnings"},
     ]
     return topics
+
+
+@app.post("/api/analyze/sentiment")
+async def analyze_sentiment(data: Dict):
+    """Analyze sentiment for provided text."""
+    if "text" not in data:
+        raise HTTPException(status_code=400, detail="Text field is required")
+        
+    text = data["text"]
+    result = analyze_article_sentiment(text)
+    return result
+
+
+@app.get("/api/user/settings")
+async def get_user_settings():
+    """Get user settings."""
+    # Mock user settings
+    settings = {
+        "darkMode": True,
+        "autoRefresh": False,
+        "refreshInterval": 5,  # minutes
+        "defaultFilters": {
+            "sources": [],
+            "topics": [],
+            "sentiment": ""
+        },
+        "emailAlerts": {
+            "enabled": False,
+            "frequency": "daily",
+            "keywords": []
+        },
+        "visualization": {
+            "chartType": "bar",
+            "colorScheme": "default"
+        }
+    }
+    return settings
+
+
+@app.post("/api/user/settings")
+async def update_user_settings(settings: Dict):
+    """Update user settings."""
+    # In a real app, we would save these to a database
+    # For this mock, we'll just return the settings
+    return {
+        "status": "success",
+        "message": "Settings updated successfully",
+        "settings": settings
+    }
 
 
 if __name__ == "__main__":
