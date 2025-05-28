@@ -1,5 +1,8 @@
 # Financial News - Advanced Analysis Platform
 
+[![Next.js](https://img.shields.io/badge/Next.js-13.5.6-black.svg)](https://nextjs.org/)
+[![React](https://img.shields.io/badge/React-18.2.0-blue.svg)](https://reactjs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.1.6-blue.svg)](https://www.typescriptlang.org/)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
@@ -25,6 +28,32 @@ A comprehensive financial news analysis and summarization platform powered by ad
 
 ## 📁 Project Structure
 
+### Next.js Implementation
+
+```
+financenews/
+├── pages/                      # Next.js pages
+│   ├── api/                    # API routes
+│   │   ├── articles/           # Article endpoints
+│   │   ├── analytics.ts        # Analytics data
+│   │   ├── sources.ts          # News sources
+│   │   ├── topics.ts           # Topics
+│   │   └── ws.ts               # WebSocket endpoint
+│   ├── articles/               # Article pages
+│   ├── analytics/              # Analytics dashboard
+│   ├── _app.tsx                # App configuration
+│   └── index.tsx               # Home page
+├── components/                 # React components
+│   ├── Layout.tsx              # Page layout
+│   ├── Navigation.tsx          # Navigation bar
+│   └── NotificationCenter.tsx  # Real-time notifications
+├── styles/                     # CSS styles
+├── public/                     # Static assets
+└── next.config.js              # Next.js configuration
+```
+
+### Original Python Backend (Preserved for Reference)
+
 ```
 financenews/
 ├── src/financial_news/          # Main package
@@ -45,38 +74,69 @@ financenews/
 
 ## 🛠️ Installation
 
-### Prerequisites
+### Prerequisites for Next.js Implementation
+- Node.js 14.0 or higher
+- npm or yarn package manager
+- Git
+
+### Prerequisites for Python Backend (Legacy)
 - Python 3.8 or higher
 - pip package manager
 - Git
 
-### Quick Start
+### Next.js Development Setup
 
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd financenews
-   ```
+1. Clone the repository:
+```bash
+git clone https://github.com/yourusername/financenews.git
+cd financenews
+```
 
-2. **Set up virtual environment** (recommended)
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
+2. Install Node.js dependencies:
+```bash
+npm install
+# or using yarn
+yarn install
+```
 
-3. **Install dependencies**
-   ```bash
-   # For production use
-   pip install -e .
-   
-   # For development
-   pip install -e ".[dev]"
-   ```
+3. Create a `.env.local` file (or use the existing one):
+```bash
+NEXT_PUBLIC_API_URL=/api
+NEXT_PUBLIC_WS_URL=ws://localhost:3000/api/ws
+```
+
+4. Start the development server:
+```bash
+npm run dev
+# or using yarn
+yarn dev
+```
+
+5. Open your browser and visit `http://localhost:3000`
+
+### Python Backend Setup (Legacy)
+
+1. Create and activate a virtual environment:
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+2. Install development dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+3. Install pre-commit hooks:
+```bash
+pre-commit install
+```
 
 4. **Configure environment**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your API keys and configuration
+```bash
+cp .env.example .env
+# Edit .env with your API keys and configuration
+```
    ```
 
 5. **Run the application**
