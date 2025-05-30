@@ -4,6 +4,10 @@ import CssBaseline from '@mui/material/CssBaseline';
 import { AppProps } from 'next/app';
 import '../styles/globals.css';
 
+// Import crawler initialization
+import { initCrawlerSystem } from '../lib/crawler-init';
+import { logCrawlerActivity } from '../lib/utils/crawler-utils';
+
 // Create a theme instance
 const lightTheme = createTheme({
   palette: {
@@ -80,6 +84,17 @@ function MyApp({ Component, pageProps }: AppProps) {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       setDarkMode(window.matchMedia('(prefers-color-scheme: dark)').matches);
+      
+      // Initialize crawler system in the client side
+      // This will only run on the client/browser
+      if (process.env.NODE_ENV === 'production') {
+        try {
+          initCrawlerSystem();
+          console.log('Crawler system initialized');
+        } catch (error) {
+          console.error('Failed to initialize crawler system:', error);
+        }
+      }
     }
   }, []);
 
