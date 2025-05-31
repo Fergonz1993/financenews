@@ -1,12 +1,28 @@
-# Node.js dependencies
+# Dependencies
 node_modules/
 .pnp/
 .pnp.js
 
-# Next.js build output
+# Testing
+/coverage
+
+# Next.js
 .next/
 out/
 build/
+dist/
+
+# Production
+/build
+
+# Debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local env files
+.env*.local
+.env
 
 # Virtual Environment
 venv/
@@ -14,8 +30,38 @@ venv/
 env/
 ENV/
 
-# Environment variables (contains API keys and secrets)
-.env
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.mypy_cache/
+.ruff_cache/
+
+# IDE/Editor folders
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Data files
+/data/*.json
+/data/*.csv
+
+# Misc
+.vercel
+.netlify
+.turbo
 
 # Python cache files
 __pycache__/
