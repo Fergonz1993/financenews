@@ -2,9 +2,28 @@ import { useState, useEffect } from 'react';
 import { Grid, Typography, Paper, Box } from '@mui/material';
 import Layout from '../components/Layout';
 
+type Article = {
+  id: string;
+  title: string;
+  source: string;
+  published_at: string;
+  summarized_headline: string;
+  summary_bullets?: string[];
+  topics?: string[];
+  sentiment?: 'positive' | 'neutral' | 'negative';
+};
+
+type ArticlesResponse = {
+  articles: Article[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
 export default function HomePage() {
-  const [articles, setArticles] = useState([]);
+  const [articles, setArticles] = useState<Article[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     // Fetch articles from the API
@@ -12,10 +31,11 @@ export default function HomePage() {
       try {
         const response = await fetch('/api/articles?limit=10');
         if (!response.ok) throw new Error('Failed to fetch articles');
-        const data = await response.json();
-        setArticles(data);
+        const data: ArticlesResponse = await response.json();
+        setArticles(data.articles ?? []);
       } catch (error) {
         console.error('Error fetching articles:', error);
+        setError('Unable to load articles right now.');
       } finally {
         setLoading(false);
       }
@@ -35,11 +55,18 @@ export default function HomePage() {
           </Typography>
         </Box>
 
-        {loading ? (
+        {loading && (
           <Typography>Loading latest financial news...</Typography>
-        ) : (
+        )}
+        {!loading && error && (
+          <Typography color="error">{error}</Typography>
+        )}
+        {!loading && !error && articles.length === 0 && (
+          <Typography>No articles available yet. Check back soon.</Typography>
+        )}
+        {!loading && !error && articles.length > 0 && (
           <Grid container spacing={3}>
-            {articles.map((article: any) => (
+            {articles.map((article) => (
               <Grid item xs={12} key={article.id}>
                 <Paper 
                   elevation={2} 
