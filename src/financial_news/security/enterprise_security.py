@@ -10,6 +10,7 @@ import base64
 import ipaddress
 import json
 import logging
+import os
 import secrets
 import sqlite3
 import time
@@ -1161,7 +1162,7 @@ class SecurityManager:
             admin_user = await self.auth.create_user(
                 username="admin",
                 email="admin@company.com",
-                password="ChangeMe123!",
+                password=os.environ.get("DEFAULT_ADMIN_PASSWORD", "change-me-immediately"),
                 roles={"admin", "security"},
                 security_level=SecurityLevel.TOP_SECRET,
             )
@@ -1282,7 +1283,7 @@ async def main():
     analyst = await security.auth.create_user(
         username="analyst1",
         email="analyst1@company.com",
-        password="TestPass123!",
+        password=os.environ.get("DEFAULT_ADMIN_PASSWORD", "change-me-immediately"),
         roles={"analyst"},
         security_level=SecurityLevel.CONFIDENTIAL,
     )
@@ -1290,7 +1291,7 @@ async def main():
     trader = await security.auth.create_user(
         username="trader1",
         email="trader1@company.com",
-        password="TraderPass123!",
+        password=os.environ.get("DEFAULT_ADMIN_PASSWORD", "change-me-immediately"),
         roles={"trader"},
         security_level=SecurityLevel.INTERNAL,
     )
@@ -1300,7 +1301,7 @@ async def main():
     # Test authentication
     auth_result = await security.auth.authenticate_user(
         username="analyst1",
-        password="TestPass123!",
+        password=os.environ.get("DEFAULT_ADMIN_PASSWORD", "change-me-immediately"),
         ip_address="192.168.1.100",
         user_agent="Mozilla/5.0...",
     )
