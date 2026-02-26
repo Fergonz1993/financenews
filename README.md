@@ -1,376 +1,228 @@
-# Financial News - Advanced Analysis Platform
+# Financial News — Real-Time Aggregation & Analysis Platform
 
-[![Next.js](https://img.shields.io/badge/Next.js-16.1.6-black.svg)](https://nextjs.org/)
-[![React](https://img.shields.io/badge/React-19.2.4-blue.svg)](https://reactjs.org/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.9.3-blue.svg)](https://www.typescriptlang.org/)
-[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![CI](https://github.com/Fergonz1993/financenews/actions/workflows/ci.yml/badge.svg)](https://github.com/Fergonz1993/financenews/actions)
+[![Next.js](https://img.shields.io/badge/Next.js-16-black.svg)](https://nextjs.org/)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A comprehensive financial news analysis and summarization platform powered by advanced AI and machine learning technologies.
+An open-source financial news platform that continuously aggregates articles from **18+ RSS feeds**, **GDELT**, **SEC EDGAR**, and **Newsdata.io** — with built-in sentiment analysis, entity extraction, and a live dashboard.
 
-## 🚀 Features
-
-### Core Capabilities
-- **Real-time News Aggregation**: Multi-source financial news collection and processing
-- **Advanced Sentiment Analysis**: AI-powered sentiment analysis using transformer models
-- **Intelligent Summarization**: Automatic article summarization and key insights extraction
-- **Interactive Dashboard**: Modern web-based dashboard for visualization and monitoring
-- **RESTful API**: Complete API for seamless integration with other systems
-- **Command-line Interface**: Powerful CLI tools for automation and scripting
-
-### Analysis Features
-- **Multi-modal Sentiment Analysis**: Text, image, and video sentiment analysis
-- **Entity Recognition**: Automatic extraction of companies, people, and financial instruments
-- **Topic Modeling**: Intelligent categorization and topic extraction
-- **Trend Analysis**: Historical trend analysis and pattern recognition
-- **Real-time Streaming**: Live data processing and WebSocket streaming
-
-## 📁 Project Structure
-
-### Next.js Implementation
-
-```
-financenews/
-├── pages/                      # Next.js pages
-│   ├── api/                    # API routes
-│   │   ├── articles/           # Article endpoints
-│   │   ├── analytics.ts        # Analytics data
-│   │   ├── sources.ts          # News sources
-│   │   ├── topics.ts           # Topics
-│   │   └── ws.ts               # WebSocket endpoint
-│   ├── articles/               # Article pages
-│   ├── analytics/              # Analytics dashboard
-│   ├── _app.tsx                # App configuration
-│   └── index.tsx               # Home page
-├── components/                 # React components
-│   ├── Layout.tsx              # Page layout
-│   ├── Navigation.tsx          # Navigation bar
-│   └── NotificationCenter.tsx  # Real-time notifications
-├── styles/                     # CSS styles
-├── public/                     # Static assets
-└── next.config.js              # Next.js configuration
-```
-
-### Original Python Backend (Preserved for Reference)
-
-```
-financenews/
-├── src/financial_news/          # Main package
-│   ├── config/                  # Configuration management
-│   ├── core/                    # Core business logic
-│   ├── models/                  # Data models and ML models
-│   ├── services/                # External services and APIs
-│   ├── api/                     # Web API layer
-│   ├── cli/                     # Command-line interface
-│   ├── dashboard/               # Interactive dashboard
-│   └── utils/                   # Utility functions
-├── tests/                       # Test suite
-├── docs/                        # Documentation
-├── scripts/                     # Development scripts
-├── config/                      # Configuration files
-└── deployment/                  # Deployment configurations
-```
-
-## 🛠️ Installation
-
-### Prerequisites for Next.js Implementation
-- Node.js 20.0 or higher
-- Bun 1.3.x (recommended) or npm 10+ (lockfile generation disabled by .npmrc)
-- Git
-- Use `.nvmrc` / `.bun-version` / `.node-version` in repo for consistent local runtimes
-
-### Prerequisites for Python Backend (Legacy)
-- Python 3.12 or higher
-- pip package manager
-- Git
-
-### Next.js Development Setup
-
-1. Clone the repository:
-```bash
-git clone https://github.com/yourusername/financenews.git
-cd financenews
-```
-
-2. Install Node.js dependencies:
-```bash
-bun install
-# if using npm, lockfile creation is disabled by .npmrc
-npm install
-```
-
-3. Create a `.env.local` file (or use the existing one):
-```bash
-NEXT_PUBLIC_API_URL=/api
-NEXT_PUBLIC_WS_URL=ws://localhost:3000/api/ws
-```
-
-4. Start the development server:
-```bash
-bun run dev
-# if using npm, lockfile creation is disabled by .npmrc
-npm run dev
-```
-
-5. Open your browser and visit `http://localhost:3000`
-
-### Python Backend Setup (Legacy)
-
-1. Create and activate a virtual environment:
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-2. Install development dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-3. Install pre-commit hooks:
-```bash
-pre-commit install
-```
-
-4. **Configure environment**
-```bash
-cp .env.example .env
-# Edit .env with your API keys and configuration
-```
-   ```
-
-5. **Run the application**
-   ```bash
-   # Start the dashboard
-   make run-dashboard
-   
-   # Or start the API server
-   make run-api
-   
-   # Or use the CLI
-   make run-cli
-   ```
-
-## 🔧 Configuration
-
-The application uses environment variables for configuration. Copy `.env.example` to `.env` and configure:
-
-```bash
-# API Keys
-ALPHA_VANTAGE_API_KEY=your_key_here
-FINNHUB_API_KEY=your_key_here
-NEWS_API_KEY=your_key_here
-
-# Database
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=financial_news
-
-# Application
-ENVIRONMENT=development
-DEBUG=true
-```
-
-## 🚀 Usage
-
-### Dashboard
-Access the interactive dashboard at `http://localhost:8000` after running:
-```bash
-make run-dashboard
-```
-
-### API
-Start the REST API server:
-```bash
-make run-api
-```
-
-API endpoints will be available at `http://localhost:8000/api/`
-
-### CLI
-Use the command-line interface:
-```bash
-# Analyze news sentiment
-python -m financial_news.cli analyze --source "news_api" --symbol "AAPL"
-
-# Generate summary
-python -m financial_news.cli summarize --input "article.txt"
-
-# Stream real-time data
-python -m financial_news.cli stream --symbols "AAPL,GOOGL,MSFT"
-```
-
-### Python API
-```python
-from financial_news import get_settings, setup_logging
-from financial_news.core.summarizer import NewsummarIzer
-from financial_news.models.ml.sentiment import SentimentAnalyzer
-
-# Initialize
-settings = get_settings()
-setup_logging(level="INFO")
-
-# Use components
-summarizer = NewsummarIzer()
-analyzer = SentimentAnalyzer()
-
-# Analyze sentiment
-result = analyzer.analyze("Apple stock reaches new highs")
-print(f"Sentiment: {result.sentiment}, Confidence: {result.confidence}")
-```
-
-## 🚀 Local Demo (Backend + Next.js Frontend)
-
-Use this to run both services and verify ingest + search quickly:
-
-```bash
-cp .env.example .env
-DEMO_ONCE=1 ./scripts/run_demo_local.sh
-```
-
-The demo script:
-
-- Starts backend (`127.0.0.1:8000`) and frontend (`127.0.0.1:3000`).
-- Triggers ingest against configured `NEWS_INGEST_FEEDS`.
-- Shows `sources`, `topics`, and a live `SEC` keyword search result.
-- Leaves services running when `DEMO_ONCE=0`.
-
-Common `.env` defaults for this flow are already included in `.env.example`:
-- `NEWS_INGEST_ENABLE_FULL_TEXT_FETCH=true`
-- `NEWS_INGEST_INTERVAL_SECONDS=0`
-- `NEXT_PUBLIC_API_URL=http://localhost:8000/api`
-- `NEWS_INGEST_FEEDS=https://www.reuters.com/tools/rss,https://www.cnbc.com/id/100003114/device/rss/rss.html,https://feeds.bbci.co.uk/news/business/rss.xml`
-
-## 🛡️ Frontend Reliability Mode (Fallback + Smoke)
-
-The Next.js API layer now uses FastAPI as primary, with a local-data fallback for backend connectivity failures.
-
-Primary behavior:
-
-1. Call FastAPI (`FASTAPI_URL` or `BACKEND_API_URL`).
-2. If backend is unreachable (`502` connectivity path), serve contract-compatible data from local files in `data/`.
-3. Keep UI routes operational (`/articles`, `/analytics`, `/admin/crawler`) with retryable states.
-
-Health and diagnostics:
-
-- `GET /api/health` reports mode (`backend`, `fallback`, `degraded`) plus backend/local diagnostics.
-
-Recommended server-side env vars:
-
-- `FASTAPI_URL=http://127.0.0.1:8000`
-- `ENABLE_LOCAL_API_FALLBACK=true`
-- `FASTAPI_REQUEST_TIMEOUT_MS=8000`
-- `FASTAPI_GET_RETRIES=1`
-
-Run full production-style smoke + screenshot regression:
-
-```bash
-bun run smoke
-```
-
-Smoke artifacts:
-
-- logs: `.tmp/smoke/`
-- screenshots: `output/playwright/smoke/`
-
-Detailed runbook: [docs/runbooks/frontend-reliability.md](docs/runbooks/frontend-reliability.md)
-
-## 🧪 Testing
-
-Run the test suite:
-```bash
-# All tests
-make test
-
-# Unit tests only
-make test-unit
-
-# Integration tests only
-make test-integration
-```
-
-## 🔍 Code Quality
-
-The project uses automated code quality tools:
-
-```bash
-# Format code
-make format
-
-# Lint code
-make lint
-
-# Run pre-commit hooks
-pre-commit run --all-files
-```
-
-## 📚 Documentation
-
-- **Full Documentation**: [docs/index.md](docs/index.md)
-- **API Reference**: [docs/api/](docs/api/)
-- **User Guide**: [docs/user-guide/](docs/user-guide/)
-- **Development Guide**: [docs/development/](docs/development/)
-
-Build and serve documentation locally:
-```bash
-make docs
-make serve-docs
-```
-
-## 🏗️ Development
-
-### Development Setup
-```bash
-# Install development dependencies
-make install-dev
-
-# Set up pre-commit hooks
-pre-commit install
-
-# Run in development mode
-make run-dashboard
-```
-
-### Project Commands
-```bash
-make help                 # Show all available commands
-make install             # Install production dependencies
-make install-dev         # Install development dependencies
-make test                # Run all tests
-make lint                # Run code linting
-make format              # Format code
-make clean               # Clean up cache files
-make build               # Build the package
-```
-
-## 🤝 Contributing
-
-We welcome contributions! Please see our [Contributing Guidelines](docs/development/contributing.md) for details.
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Ensure all tests pass
-6. Submit a pull request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🆘 Support
-
-- **Documentation**: Comprehensive guides and API reference
-- **Issues**: [GitHub Issues](https://github.com/your-repo/issues) for bug reports and feature requests
-- **Discussions**: [GitHub Discussions](https://github.com/your-repo/discussions) for questions and community support
-
-## 🙏 Acknowledgments
-
-- Built with modern Python best practices
-- Powered by state-of-the-art transformer models
-- Inspired by the open-source community
+![Dashboard](https://img.shields.io/badge/status-active-brightgreen)
 
 ---
 
-**Made with ❤️ by the Financial News Team** 
+## ✨ Features
+
+| Feature | Description |
+|---------|-------------|
+| **Continuous Ingestion** | Background loop fetches from all sources every 5 minutes |
+| **18+ RSS Feeds** | Reuters, CNBC, Yahoo Finance, MarketWatch, WSJ, Bloomberg, FT, and more |
+| **GDELT Connector** | Free global news via GDELT v2 DOC API (no API key) |
+| **SEC EDGAR Connector** | SEC filings and press releases (no API key) |
+| **Newsdata.io Connector** | Optional structured news API (free tier, 200 req/day) |
+| **Sentiment Analysis** | VADER-based sentiment scoring on every article |
+| **Entity Extraction** | Automatic company/person recognition |
+| **Topic Modeling** | Finance, Markets, AI, Earnings, Policy classification |
+| **Live Dashboard** | Next.js frontend with auto-refresh and filtering |
+| **Admin Ingest Panel** | Real-time connector status, manual trigger, error log |
+| **REST API** | Full CRUD for articles, sources, analytics, and ingestion |
+| **WebSocket Notifications** | Real-time alerts for market events |
+| **Cross-Source Dedup** | URL canonicalization + fuzzy title matching |
+
+## 🏗 Architecture
+
+```
+┌─────────────────────────────────────────────────┐
+│                  Next.js Frontend                │
+│  Dashboard · Articles · Analytics · Admin Panel  │
+│              (pages/ + components/)               │
+└──────────────────────┬──────────────────────────┘
+                       │ HTTP / WebSocket
+┌──────────────────────▼──────────────────────────┐
+│                  FastAPI Backend                  │
+│         src/financial_news/api/main.py           │
+├──────────────────────────────────────────────────┤
+│  Continuous Runner        │  RSS Feed Ingestor   │
+│  (GDELT · SEC · Newsdata) │  (18+ feeds)         │
+├──────────────────────────────────────────────────┤
+│  Sentiment Analysis · Entity Extraction · Topics │
+├──────────────────────────────────────────────────┤
+│                   PostgreSQL                     │
+└──────────────────────────────────────────────────┘
+```
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- Python 3.12+
+- Node.js 20+
+- PostgreSQL 16+ (or Docker)
+
+### 1. Clone & Configure
+
+```bash
+git clone https://github.com/Fergonz1993/financenews.git
+cd financenews
+cp .env.example .env
+# Edit .env — at minimum set your DB credentials
+```
+
+### 2. Backend Setup
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+```
+
+### 3. Frontend Setup
+
+```bash
+npm install
+```
+
+### 4. Database
+
+```bash
+# Option A: Local PostgreSQL
+createdb financenews
+
+# Option B: Docker
+docker compose up postgres -d
+```
+
+### 5. Run
+
+```bash
+python run_server.py
+```
+
+This starts both:
+
+- **FastAPI** at `http://localhost:8000` (API + continuous ingestion)
+- **Next.js** at `http://localhost:3000` (dashboard)
+
+### Or use Docker
+
+```bash
+docker compose up --build
+```
+
+## 📡 Data Sources
+
+### Free (No API Key)
+
+| Source | Type | Articles/Cycle |
+|--------|------|----------------|
+| Reuters, CNBC, BBC, Yahoo Finance, MarketWatch | RSS | ~25 each |
+| WSJ, Financial Times, The Economist, Nasdaq | RSS | ~25 each |
+| Bloomberg (via Google News) | RSS | ~25 |
+| Google News (Finance, Markets, AI, Earnings) | RSS | ~25 each |
+| SEC Press Releases | RSS/Atom | ~25 |
+| GDELT Project | REST API | ~25 |
+| SEC EDGAR (full-text search) | REST API | ~25 |
+
+### Optional (Free Tier, Needs Key)
+
+| Source | Type | Limit |
+|--------|------|-------|
+| Newsdata.io | REST API | 200 req/day |
+
+Set `NEWSDATA_API_KEY` in `.env` to enable.
+
+## 🔌 API
+
+### Articles
+
+```
+GET  /api/articles              # List with filters, pagination, sorting
+GET  /api/articles/count        # Count matching filters
+GET  /api/articles/{id}         # Single article detail
+```
+
+### Analytics
+
+```
+GET  /api/analytics             # Sentiment distribution, top entities/topics
+```
+
+### Sources
+
+```
+GET  /api/sources               # List configured sources
+POST /api/sources               # Add/update a source
+```
+
+### Ingestion
+
+```
+POST /api/ingest                    # Run RSS ingestion now
+POST /api/ingest/continuous/trigger # Run full cycle (all connectors + RSS)
+GET  /api/ingest/status             # Status with connector health
+GET  /api/ingest/continuous/status  # Detailed connector-level status
+```
+
+## 🧪 Tests
+
+```bash
+# Python unit tests (57 tests)
+PYTHONPATH=src pytest tests/unit -v
+
+# TypeScript type check
+npx tsc --noEmit
+```
+
+## 📁 Project Structure
+
+```
+financenews/
+├── pages/                           # Next.js pages
+│   ├── index.tsx                    # Dashboard (auto-refresh)
+│   ├── articles/                    # Article list & detail
+│   ├── analytics/                   # Analytics dashboard
+│   ├── admin/ingest.tsx             # Ingest admin panel
+│   └── api/                         # Next.js API routes (proxy to FastAPI)
+├── components/                      # React components
+├── src/financial_news/              # Python backend
+│   ├── api/main.py                  # FastAPI app + routes
+│   ├── services/
+│   │   ├── news_ingest.py           # RSS feed ingestion (18+ feeds)
+│   │   ├── continuous_runner.py     # Background ingestion loop
+│   │   ├── content_extractor.py     # HTTP article text extraction
+│   │   └── connectors/              # Public API connectors
+│   │       ├── gdelt.py             # GDELT v2 DOC API
+│   │       ├── sec_edgar.py         # SEC EDGAR + press RSS
+│   │       └── newsdata.py          # Newsdata.io (optional)
+│   ├── storage/                     # PostgreSQL models & repositories
+│   └── core/                        # Sentiment, summarizer, config
+├── tests/unit/                      # Unit tests
+├── docker-compose.yml               # PostgreSQL + app
+├── Dockerfile                       # Full production image
+├── run_server.py                    # Dev server (FastAPI + Next.js)
+└── .env.example                     # All configuration documented
+```
+
+## ⚙️ Configuration
+
+All config is via environment variables. See [`.env.example`](.env.example) for the full list. Key settings:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DATABASE_URL` | `postgresql://...` | PostgreSQL connection string |
+| `CONTINUOUS_INGEST_ENABLED` | `true` | Enable background ingestion loop |
+| `CONTINUOUS_INGEST_INTERVAL_SECONDS` | `300` | Seconds between ingestion cycles |
+| `GDELT_ENABLED` | `true` | Enable GDELT connector |
+| `SEC_EDGAR_ENABLED` | `true` | Enable SEC EDGAR connector |
+| `NEWSDATA_ENABLED` | `true` | Enable Newsdata.io (needs API key) |
+| `NEWSDATA_API_KEY` | _(empty)_ | Newsdata.io free tier key |
+
+## 🤝 Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, code style, and PR process.
+
+The easiest way to contribute is **adding a new data source connector** — see the guide in CONTRIBUTING.md.
+
+## 📄 License
+
+[MIT](LICENSE) © Fernando Gonzalez

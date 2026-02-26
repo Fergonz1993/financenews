@@ -380,3 +380,8 @@ dump.rdb
 *.tar.gz
 *.rar
 *.7z
+
+# Build artifacts
+output/
+test-results/
+tsconfig.tsbuildinfo

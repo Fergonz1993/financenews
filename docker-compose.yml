@@ -1,106 +1,28 @@
-version: '3.8'
-
 services:
   app:
     build: .
     container_name: financenews-app
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "8000:8000"   # FastAPI
+      - "3000:3000"   # Next.js
     volumes:
       - ./data:/app/data
-      - ./logs:/app/logs
-      - ./briefings:/app/briefings
+    env_file:
+      - .env
     environment:
-      - ENVIRONMENT=production
-      - LOG_LEVEL=INFO
-      - REDIS_HOST=redis
-      - MONGO_URI=mongodb://mongo:27017/financenews
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/financenews
       - DB_HOST=postgres
       - DB_PORT=5432
       - DB_NAME=financenews
       - DB_USER=postgres
       - DB_PASSWORD=postgres
+      - CONTINUOUS_INGEST_ENABLED=true
+      - CONTINUOUS_INGEST_INTERVAL_SECONDS=300
     depends_on:
-      - postgres
-      - redis
-      - mongo
-    command: python -m financial_news.cli run-api
-
-  dashboard:
-    build: .
-    container_name: financenews-dashboard
-    restart: unless-stopped
-    ports:
-      - "8501:8501"
-    volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-      - ./briefings:/app/briefings
-    environment:
-      - ENVIRONMENT=production
-      - LOG_LEVEL=INFO
-      - REDIS_HOST=redis
-      - MONGO_URI=mongodb://mongo:27017/financenews
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/financenews
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_NAME=financenews
-      - DB_USER=postgres
-      - DB_PASSWORD=postgres
-    depends_on:
-      - postgres
-      - redis
-      - mongo
-      - app
-    command: python -m financial_news.dashboard
-
-  redis:
-    image: redis:7-alpine
-    container_name: financenews-redis
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis-data:/data
-    command: redis-server --appendonly yes
-
-  mongo:
-    image: mongo:6
-    container_name: financenews-mongo
-    restart: unless-stopped
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongo-data:/data/db
-    environment:
-      - MONGO_INITDB_DATABASE=financenews
-
-  scheduler:
-    build: .
-    container_name: financenews-scheduler
-    restart: unless-stopped
-    volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-      - ./briefings:/app/briefings
-    environment:
-      - ENVIRONMENT=production
-      - LOG_LEVEL=INFO
-      - REDIS_HOST=redis
-      - MONGO_URI=mongodb://mongo:27017/financenews
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/financenews
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_NAME=financenews
-      - DB_USER=postgres
-      - DB_PASSWORD=postgres
-    depends_on:
-      - postgres
-      - redis
-      - mongo
-    command: python -m financial_news.cli run-scheduler
+      postgres:
+        condition: service_healthy
+    command: python run_server.py
 
   postgres:
     image: postgres:16-alpine
@@ -121,6 +43,4 @@ services:
       retries: 5
 
 volumes:
-  redis-data:
-  mongo-data:
   postgres-data:

@@ -1,7 +1,0 @@
-output/playwright/live-interact-01-dashboard.png
-output/playwright/live-interact-02-dashboard-search-typed.png
-output/playwright/live-interact-03-dashboard-after-clear-click.png
-output/playwright/live-interact-04-articles-via-nav.png
-output/playwright/live-interact-05-analytics-via-nav.png
-output/playwright/live-interact-06-admin-before-run-click.png
-output/playwright/live-interact-07-admin-after-run-click.png
