@@ -1,13 +1,26 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import { Server } from 'socket.io';
+import { Server as HttpServer } from 'http';
+import type { Socket } from 'socket.io';
 
 const SocketHandler = (req: NextApiRequest, res: NextApiResponse) => {
-  if (res.socket.server.io) {
+  const socketServer = (res.socket as { server?: HttpServer & { io?: Server } } | null | undefined)?.server;
+
+  if (!socketServer) {
+    return res.status(500).send('Socket server not available');
+  }
+
+    if (socketServer.io) {
     console.log('Socket is already running');
   } else {
     console.log('Socket is initializing');
-    const io = new Server(res.socket.server);
-    res.socket.server.io = io;
+    const io = new Server(socketServer, {
+      path: '/api/ws',
+      cors: {
+        origin: '*',
+      },
+    });
+    socketServer.io = io;
 
     io.on('connection', socket => {
       console.log(`Client connected: ${socket.id}`);
@@ -19,9 +32,10 @@ const SocketHandler = (req: NextApiRequest, res: NextApiResponse) => {
       }));
 
       // Setup demo alerts (simulating backend events)
-      setupDemoAlerts(socket);
+      const stopDemoAlerts = setupDemoAlerts(socket);
 
       socket.on('disconnect', () => {
+        stopDemoAlerts();
         console.log(`Client disconnected: ${socket.id}`);
       });
     });
@@ -30,7 +44,7 @@ const SocketHandler = (req: NextApiRequest, res: NextApiResponse) => {
 };
 
 // Function to simulate backend events for demo purposes
-function setupDemoAlerts(socket: any) {
+function setupDemoAlerts(socket: Socket): () => void {
   // Market alerts
   const marketAlerts = [
     {
@@ -69,8 +83,15 @@ function setupDemoAlerts(socket: any) {
     }
   ];
 
+  let active = true;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
   // Send random alerts periodically
   const sendRandomAlert = () => {
+    if (!active || !socket.connected) {
+      return;
+    }
+
     const now = new Date();
     const hour = now.getHours();
     
@@ -97,11 +118,18 @@ function setupDemoAlerts(socket: any) {
     
     // Schedule next alert
     const delay = 30000 + Math.random() * 60000; // 30-90 seconds
-    setTimeout(sendRandomAlert, delay);
+    timer = setTimeout(sendRandomAlert, delay);
   };
 
   // Start sending alerts after a short delay
-  setTimeout(sendRandomAlert, 5000);
+  timer = setTimeout(sendRandomAlert, 5000);
+
+  return () => {
+    active = false;
+    if (timer) {
+      clearTimeout(timer);
+    }
+  };
 }
 
 export default SocketHandler;

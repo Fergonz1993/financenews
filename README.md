@@ -1,9 +1,9 @@
 # Financial News - Advanced Analysis Platform
 
-[![Next.js](https://img.shields.io/badge/Next.js-13.5.6-black.svg)](https://nextjs.org/)
-[![React](https://img.shields.io/badge/React-18.2.0-blue.svg)](https://reactjs.org/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.1.6-blue.svg)](https://www.typescriptlang.org/)
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![Next.js](https://img.shields.io/badge/Next.js-16.1.6-black.svg)](https://nextjs.org/)
+[![React](https://img.shields.io/badge/React-19.2.4-blue.svg)](https://reactjs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.9.3-blue.svg)](https://www.typescriptlang.org/)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
@@ -75,12 +75,13 @@ financenews/
 ## 🛠️ Installation
 
 ### Prerequisites for Next.js Implementation
-- Node.js 14.0 or higher
-- npm or yarn package manager
+- Node.js 20.0 or higher
+- Bun 1.3.x (recommended) or npm 10+ (lockfile generation disabled by .npmrc)
 - Git
+- Use `.nvmrc` / `.bun-version` / `.node-version` in repo for consistent local runtimes
 
 ### Prerequisites for Python Backend (Legacy)
-- Python 3.8 or higher
+- Python 3.12 or higher
 - pip package manager
 - Git
 
@@ -94,9 +95,9 @@ cd financenews
 
 2. Install Node.js dependencies:
 ```bash
+bun install
+# if using npm, lockfile creation is disabled by .npmrc
 npm install
-# or using yarn
-yarn install
 ```
 
 3. Create a `.env.local` file (or use the existing one):
@@ -107,9 +108,9 @@ NEXT_PUBLIC_WS_URL=ws://localhost:3000/api/ws
 
 4. Start the development server:
 ```bash
+bun run dev
+# if using npm, lockfile creation is disabled by .npmrc
 npm run dev
-# or using yarn
-yarn dev
 ```
 
 5. Open your browser and visit `http://localhost:3000`
@@ -218,6 +219,62 @@ analyzer = SentimentAnalyzer()
 result = analyzer.analyze("Apple stock reaches new highs")
 print(f"Sentiment: {result.sentiment}, Confidence: {result.confidence}")
 ```
+
+## 🚀 Local Demo (Backend + Next.js Frontend)
+
+Use this to run both services and verify ingest + search quickly:
+
+```bash
+cp .env.example .env
+DEMO_ONCE=1 ./scripts/run_demo_local.sh
+```
+
+The demo script:
+
+- Starts backend (`127.0.0.1:8000`) and frontend (`127.0.0.1:3000`).
+- Triggers ingest against configured `NEWS_INGEST_FEEDS`.
+- Shows `sources`, `topics`, and a live `SEC` keyword search result.
+- Leaves services running when `DEMO_ONCE=0`.
+
+Common `.env` defaults for this flow are already included in `.env.example`:
+- `NEWS_INGEST_ENABLE_FULL_TEXT_FETCH=true`
+- `NEWS_INGEST_INTERVAL_SECONDS=0`
+- `NEXT_PUBLIC_API_URL=http://localhost:8000/api`
+- `NEWS_INGEST_FEEDS=https://www.reuters.com/tools/rss,https://www.cnbc.com/id/100003114/device/rss/rss.html,https://feeds.bbci.co.uk/news/business/rss.xml`
+
+## 🛡️ Frontend Reliability Mode (Fallback + Smoke)
+
+The Next.js API layer now uses FastAPI as primary, with a local-data fallback for backend connectivity failures.
+
+Primary behavior:
+
+1. Call FastAPI (`FASTAPI_URL` or `BACKEND_API_URL`).
+2. If backend is unreachable (`502` connectivity path), serve contract-compatible data from local files in `data/`.
+3. Keep UI routes operational (`/articles`, `/analytics`, `/admin/crawler`) with retryable states.
+
+Health and diagnostics:
+
+- `GET /api/health` reports mode (`backend`, `fallback`, `degraded`) plus backend/local diagnostics.
+
+Recommended server-side env vars:
+
+- `FASTAPI_URL=http://127.0.0.1:8000`
+- `ENABLE_LOCAL_API_FALLBACK=true`
+- `FASTAPI_REQUEST_TIMEOUT_MS=8000`
+- `FASTAPI_GET_RETRIES=1`
+
+Run full production-style smoke + screenshot regression:
+
+```bash
+bun run smoke
+```
+
+Smoke artifacts:
+
+- logs: `.tmp/smoke/`
+- screenshots: `output/playwright/smoke/`
+
+Detailed runbook: [docs/runbooks/frontend-reliability.md](docs/runbooks/frontend-reliability.md)
 
 ## 🧪 Testing
 

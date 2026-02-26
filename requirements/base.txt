@@ -28,6 +28,11 @@ torch>=2.1.0
 fastapi>=0.104.0
 uvicorn>=0.24.0
 
+# Database
+SQLAlchemy>=2.0.40
+asyncpg>=0.30.0
+alembic>=1.13.0
+
 # Data Processing
 polars>=0.20.0
-pyarrow>=14.0.0 
+pyarrow>=14.0.0

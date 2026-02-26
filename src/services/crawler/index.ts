@@ -4,6 +4,7 @@
  * This service provides functionality to crawl, scrape, and aggregate financial news
  * from various sources including RSS feeds, websites, and APIs.
  */
+import { crawlerScheduler } from './CrawlerScheduler';
 
 // Export manager and scheduler
 export { crawlerManager } from './CrawlerManager';
@@ -28,7 +29,6 @@ export function initCrawlerSystem(autoStart: boolean = true): boolean {
   try {
     if (autoStart) {
       // Start the crawler scheduler
-      const { crawlerScheduler } = require('./CrawlerScheduler');
       crawlerScheduler.start();
       
       console.log('Crawler system initialized successfully');

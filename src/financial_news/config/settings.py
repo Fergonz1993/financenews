@@ -9,7 +9,16 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import toml
+try:
+    # Python 3.11+ provides built-in TOML parsing support.
+    from tomllib import load as _toml_load
+except ImportError:  # pragma: no cover - fallback for older Python/runtimes
+    try:
+        import toml as _toml_module
+
+        _toml_load = _toml_module.load
+    except ImportError:  # pragma: no cover - should not happen on Python 3.11+
+        _toml_load = None
 
 
 @dataclass
@@ -157,7 +166,12 @@ class Settings:
 
         if config_path and Path(config_path).exists():
             if config_path.endswith(".toml"):
-                config_data = toml.load(config_path)
+                if _toml_load is None:
+                    raise RuntimeError(
+                        "TOML parser unavailable; install toml or run on Python 3.11+"
+                    )
+                with Path(config_path).open("rb") as config_file:
+                    config_data = _toml_load(config_file)
                 # Extract financial_news specific config if it exists
                 if "financial_news" in config_data:
                     config_data = config_data["financial_news"]

@@ -1,6 +1,5 @@
 import { BaseCrawler } from './BaseCrawler';
 import { NewsSource, Article } from '../../../types';
-import fetch from 'node-fetch';
 import { generateArticleHash, logCrawlerActivity } from '../utils/crawler-utils';
 import { format } from 'date-fns';
 

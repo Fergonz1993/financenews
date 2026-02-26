@@ -16,7 +16,14 @@ services:
       - LOG_LEVEL=INFO
       - REDIS_HOST=redis
       - MONGO_URI=mongodb://mongo:27017/financenews
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/financenews
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=financenews
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
     depends_on:
+      - postgres
       - redis
       - mongo
     command: python -m financial_news.cli run-api
@@ -36,7 +43,14 @@ services:
       - LOG_LEVEL=INFO
       - REDIS_HOST=redis
       - MONGO_URI=mongodb://mongo:27017/financenews
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/financenews
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=financenews
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
     depends_on:
+      - postgres
       - redis
       - mongo
       - app
@@ -76,11 +90,37 @@ services:
       - LOG_LEVEL=INFO
       - REDIS_HOST=redis
       - MONGO_URI=mongodb://mongo:27017/financenews
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/financenews
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=financenews
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
     depends_on:
+      - postgres
       - redis
       - mongo
     command: python -m financial_news.cli run-scheduler
 
+  postgres:
+    image: postgres:16-alpine
+    container_name: financenews-postgres
+    restart: unless-stopped
+    ports:
+      - "5433:5432"
+    environment:
+      - POSTGRES_DB=financenews
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d financenews"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   redis-data:
   mongo-data:
+  postgres-data:

@@ -1,10 +1,12 @@
-import { createContext, useContext, useState, ReactNode } from 'react';
-import { Alert, Snackbar, AlertColor } from '@mui/material';
+import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from 'react';
+import { cn } from '@/lib/utils';
+
+type NotificationType = 'info' | 'success' | 'error' | 'warning';
 
 type Notification = {
   id: number;
   message: string;
-  type: AlertColor;
+  type: NotificationType;
   open: boolean;
 };
 
@@ -22,70 +24,71 @@ const NotificationContext = createContext<NotificationContextType>({
   notifyWarning: () => {},
 });
 
-export const useNotification = () => useContext(NotificationContext);
+export const useNotification = (): NotificationContextType => useContext(NotificationContext);
 
 type NotificationProviderProps = {
   children: ReactNode;
 };
 
-export const NotificationProvider = ({ children }: NotificationProviderProps) => {
+const notificationStyles: Record<NotificationType, string> = {
+  info: 'border-primary/30 bg-primary/10 text-foreground',
+  success: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200',
+  error: 'border-destructive/40 bg-destructive/10 text-destructive',
+  warning: 'border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-200',
+};
+
+export const NotificationProvider = ({ children }: NotificationProviderProps): React.JSX.Element => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  let nextId = 0;
+  const nextIdRef = useRef(0);
 
-  const addNotification = (message: string, type: AlertColor) => {
-    const id = nextId++;
-    setNotifications(prev => [...prev, { id, message, type, open: true }]);
-    
-    // Auto-dismiss after 5 seconds
-    setTimeout(() => {
-      closeNotification(id);
-    }, 5000);
-  };
-
-  const closeNotification = (id: number) => {
-    setNotifications(prev => 
-      prev.map(notification => 
-        notification.id === id 
-          ? { ...notification, open: false } 
-          : notification
+  const closeNotification = useCallback((id: number) => {
+    setNotifications((prev) =>
+      prev.map((notification) =>
+        notification.id === id ? { ...notification, open: false } : notification
       )
     );
-    
-    // Remove from state after animation completes
-    setTimeout(() => {
-      setNotifications(prev => prev.filter(notification => notification.id !== id));
-    }, 300);
-  };
 
-  const notifyInfo = (message: string) => addNotification(message, 'info');
-  const notifySuccess = (message: string) => addNotification(message, 'success');
-  const notifyError = (message: string) => addNotification(message, 'error');
-  const notifyWarning = (message: string) => addNotification(message, 'warning');
+    setTimeout(() => {
+      setNotifications((prev) => prev.filter((notification) => notification.id !== id));
+    }, 250);
+  }, []);
+
+  const addNotification = useCallback(
+    (message: string, type: NotificationType) => {
+      const id = nextIdRef.current++;
+      setNotifications((prev) => [...prev, { id, message, type, open: true }]);
+
+      setTimeout(() => {
+        closeNotification(id);
+      }, 5000);
+    },
+    [closeNotification]
+  );
+
+  const notifyInfo = useCallback((message: string) => addNotification(message, 'info'), [addNotification]);
+  const notifySuccess = useCallback((message: string) => addNotification(message, 'success'), [addNotification]);
+  const notifyError = useCallback((message: string) => addNotification(message, 'error'), [addNotification]);
+  const notifyWarning = useCallback((message: string) => addNotification(message, 'warning'), [addNotification]);
 
   return (
     <NotificationContext.Provider value={{ notifyInfo, notifySuccess, notifyError, notifyWarning }}>
       {children}
-      
-      {/* Render notifications */}
-      {notifications.map(notification => (
-        <Snackbar 
-          key={notification.id}
-          open={notification.open}
-          autoHideDuration={6000}
-          onClose={() => closeNotification(notification.id)}
-          anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-          sx={{ mb: notifications.indexOf(notification) * 8 }} // Stack notifications
-        >
-          <Alert 
-            onClose={() => closeNotification(notification.id)} 
-            severity={notification.type}
-            variant="filled"
-            sx={{ width: '100%' }}
+
+      <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex max-w-sm flex-col gap-2">
+        {notifications.map((notification) => (
+          <div
+            key={notification.id}
+            role="status"
+            className={cn(
+              'pointer-events-auto rounded-md border px-3 py-2 text-sm shadow-md transition-opacity duration-200',
+              notificationStyles[notification.type],
+              notification.open ? 'opacity-100' : 'opacity-0'
+            )}
           >
-            {notification.message}
-          </Alert>
-        </Snackbar>
-      ))}
+            <p>{notification.message}</p>
+          </div>
+        ))}
+      </div>
     </NotificationContext.Provider>
   );
 };

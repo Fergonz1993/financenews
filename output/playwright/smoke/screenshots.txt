@@ -1,0 +1,12 @@
+output/playwright/smoke/desktop/home.png
+output/playwright/smoke/desktop/articles.png
+output/playwright/smoke/desktop/analytics.png
+output/playwright/smoke/desktop/admin-crawler.png
+output/playwright/smoke/desktop/saved.png
+output/playwright/smoke/desktop/settings.png
+output/playwright/smoke/mobile/home.png
+output/playwright/smoke/mobile/articles.png
+output/playwright/smoke/mobile/analytics.png
+output/playwright/smoke/mobile/admin-crawler.png
+output/playwright/smoke/mobile/saved.png
+output/playwright/smoke/mobile/settings.png

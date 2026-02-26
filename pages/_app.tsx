@@ -1,110 +1,98 @@
-import { useState, useEffect } from 'react';
-import { ThemeProvider, createTheme } from '@mui/material/styles';
-import CssBaseline from '@mui/material/CssBaseline';
-import { AppProps } from 'next/app';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Newsreader, Public_Sans } from 'next/font/google';
+import type { AppProps } from 'next/app';
 import '../styles/globals.css';
 
-// Import crawler initialization
 import { initCrawlerSystem } from '../lib/crawler-init';
-import { logCrawlerActivity } from '../lib/utils/crawler-utils';
+import { NotificationContext } from '../lib/notification-context';
 
-// Create a theme instance
-const lightTheme = createTheme({
-  palette: {
-    mode: 'light',
-    primary: {
-      main: '#1976d2',
-    },
-    secondary: {
-      main: '#dc004e',
-    },
-  },
+const bodyFont = Public_Sans({
+  subsets: ['latin'],
+  variable: '--font-body',
+  weight: ['400', '500', '600', '700'],
+  display: 'swap',
 });
 
-const darkTheme = createTheme({
-  palette: {
-    mode: 'dark',
-    primary: {
-      main: '#90caf9',
-    },
-    secondary: {
-      main: '#f48fb1',
-    },
-  },
+const displayFont = Newsreader({
+  subsets: ['latin'],
+  variable: '--font-display',
+  weight: ['500', '600', '700'],
+  display: 'swap',
 });
 
-// Create a context for notifications
-import { createContext, useContext } from 'react';
-
-type NotificationType = {
-  notifyInfo: (message: string) => void;
-  notifySuccess: (message: string) => void;
-  notifyError: (message: string) => void;
-  notifyWarning: (message: string) => void;
-};
-
-const NotificationContext = createContext<NotificationType>({
-  notifyInfo: () => {},
-  notifySuccess: () => {},
-  notifyError: () => {},
-  notifyWarning: () => {},
-});
-
-export const useNotification = () => useContext(NotificationContext);
-
-function MyApp({ Component, pageProps }: AppProps) {
-  const [darkMode, setDarkMode] = useState(false);
-
-  // Notification functions (simplified for now)
-  const notifyInfo = (message: string) => {
-    console.log('INFO:', message);
-    // In a real app, you'd use a notification library or custom component
-  };
-
-  const notifySuccess = (message: string) => {
-    console.log('SUCCESS:', message);
-  };
-
-  const notifyError = (message: string) => {
-    console.log('ERROR:', message);
-  };
-
-  const notifyWarning = (message: string) => {
-    console.log('WARNING:', message);
-  };
-
-  const notificationValue = {
-    notifyInfo,
-    notifySuccess,
-    notifyError,
-    notifyWarning,
-  };
-
-  // Detect user's preferred color scheme
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      setDarkMode(window.matchMedia('(prefers-color-scheme: dark)').matches);
-      
-      // Initialize crawler system in the client side
-      // This will only run on the client/browser
-      if (process.env.NODE_ENV === 'production') {
-        try {
-          initCrawlerSystem();
-          console.log('Crawler system initialized');
-        } catch (error) {
-          console.error('Failed to initialize crawler system:', error);
-        }
-      }
+function MyApp({ Component, pageProps }: AppProps): React.JSX.Element {
+  const getPreferredDarkMode = (): boolean => {
+    if (typeof window === 'undefined') {
+      return false;
     }
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  };
+
+  const [darkMode, setDarkMode] = useState<boolean>(getPreferredDarkMode);
+
+  const notifyInfo = useCallback((message: string) => {
+    console.log('INFO:', message);
   }, []);
 
+  const notifySuccess = useCallback((message: string) => {
+    console.log('SUCCESS:', message);
+  }, []);
+
+  const notifyError = useCallback((message: string) => {
+    console.log('ERROR:', message);
+  }, []);
+
+  const notifyWarning = useCallback((message: string) => {
+    console.log('WARNING:', message);
+  }, []);
+
+  const notificationValue = useMemo(
+    () => ({
+      notifyInfo,
+      notifySuccess,
+      notifyError,
+      notifyWarning,
+    }),
+    [notifyInfo, notifySuccess, notifyError, notifyWarning]
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleColorSchemeChange = (event: MediaQueryListEvent) => {
+      setDarkMode(event.matches);
+    };
+
+    if (process.env.NODE_ENV === 'production') {
+      try {
+        initCrawlerSystem();
+        console.log('Crawler system initialized');
+      } catch (error) {
+        console.error('Failed to initialize crawler system:', error);
+      }
+    }
+
+    mediaQuery.addEventListener('change', handleColorSchemeChange);
+    return () => mediaQuery.removeEventListener('change', handleColorSchemeChange);
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') {
+      return;
+    }
+
+    document.documentElement.classList.toggle('dark', darkMode);
+  }, [darkMode]);
+
   return (
-    <ThemeProvider theme={darkMode ? darkTheme : lightTheme}>
-      <CssBaseline />
+    <div className={`${bodyFont.className} ${bodyFont.variable} ${displayFont.variable}`}>
       <NotificationContext.Provider value={notificationValue}>
         <Component {...pageProps} />
       </NotificationContext.Provider>
-    </ThemeProvider>
+    </div>
   );
 }
 

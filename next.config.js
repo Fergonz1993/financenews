@@ -1,8 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  swcMinify: true,
-  
+
   // Configure source directory (future optimization - commented for now)
   // We'll keep pages at root level for now to avoid breaking changes
   // experimental: {
@@ -11,23 +10,23 @@ const nextConfig = {
   
   // Optimize images
   images: {
-    domains: ['example.com', 'images.unsplash.com'],
-    formats: ['image/avif', 'image/webp'],
-    deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048],
-    // Add more domains as needed for your news sources
     remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'example.com',
+      },
+      {
+        protocol: 'https',
+        hostname: 'images.unsplash.com',
+      },
       {
         protocol: 'https',
         hostname: '**',
       },
     ],
-  },
-  
-  // Configure API routes
-  serverRuntimeConfig: {
-    // Will only be available on the server side
-    apiBodySizeLimit: '1mb',
-    projectRoot: __dirname,
+    formats: ['image/avif', 'image/webp'],
+    deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048],
+    // Add more domains as needed for your news sources
   },
   
   // Environment variables exposed to the browser

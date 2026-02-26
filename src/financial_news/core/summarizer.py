@@ -161,6 +161,7 @@ class Article:
         "sentiment",
         "sentiment_score",
         "source",
+        "source_item_id",
         "summarized_headline",
         "summary_bullets",
         "title",
@@ -179,6 +180,7 @@ class Article:
         self.title = title
         self.url = url
         self.source = source
+        self.source_item_id: str | None = None
         self.published_at = published_at
         self.content = content
 
@@ -208,13 +210,17 @@ class Article:
 
     def to_dict(self) -> dict:
         """Convert article to dictionary for serialization."""
+        content = self.content
+        if len(content) >= 1000:
+            content = f"{content[:996]}..."
         return {
             "id": self.id,
             "title": self.title,
             "url": self.url,
             "source": self.source,
+            "source_item_id": self.source_item_id,
             "published_at": self.published_at,
-            "content": self.content,
+            "content": content,
             "summarized_headline": self.summarized_headline,
             "summary_bullets": self.summary_bullets,
             "why_it_matters": self.why_it_matters,
@@ -229,6 +235,41 @@ class Article:
                 self.processed_at.isoformat() if self.processed_at else None
             ),
         }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Article":
+        """Create an article instance from a serialized dictionary."""
+        article = cls(
+            title=data.get("title", ""),
+            url=data.get("url", ""),
+            source=data.get("source", ""),
+            published_at=data.get("published_at", ""),
+            content=data.get("content", ""),
+        )
+
+        article.id = data.get("id", article.id)
+        article.source_item_id = data.get("source_item_id")
+        article.summarized_headline = data.get("summarized_headline")
+        article.summary_bullets = data.get("summary_bullets", []) or []
+        article.why_it_matters = data.get("why_it_matters")
+        article.sentiment = data.get("sentiment")
+        article.sentiment_score = data.get("sentiment_score")
+        article.market_impact_score = data.get("market_impact_score")
+        article.relevance_score = data.get("relevance_score")
+        article.key_entities = data.get("key_entities", []) or []
+        article.topics = data.get("topics", []) or []
+
+        processed_at = data.get("processed_at")
+        if processed_at:
+            try:
+                article.processed_at = datetime.fromisoformat(processed_at)
+            except ValueError:
+                article.processed_at = None
+
+        if data.get("processing_time") is not None:
+            article.processing_time = float(data.get("processing_time"))
+
+        return article
 
 
 # Enhanced caching system with connection pooling

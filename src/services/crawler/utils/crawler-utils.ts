@@ -1,8 +1,5 @@
 import crypto from 'crypto';
 import robotsParser from 'robots-parser';
-import fetch from 'node-fetch';
-import { Article } from '../../../types';
-
 /**
  * Generate a unique hash for an article to help with deduplication
  */
@@ -25,7 +22,7 @@ export async function checkRobotsTxt(url: string, userAgent: string): Promise<bo
     const robotsTxt = await response.text();
     const robots = robotsParser(robotsUrl, robotsTxt);
     
-    return robots.isAllowed(url, userAgent);
+    return robots.isAllowed(url, userAgent) ?? true;
   } catch (error) {
     console.error('Error checking robots.txt:', error);
     return true; // Default to allowed in case of error

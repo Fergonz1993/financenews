@@ -1,53 +1,211 @@
-import { useState, useEffect } from 'react';
-import { 
-  Container, Typography, Box, Button, Paper, TableContainer, 
-  Table, TableHead, TableRow, TableCell, TableBody, Chip,
-  Dialog, DialogTitle, DialogContent, DialogActions,
-  TextField, FormControl, InputLabel, Select, MenuItem,
-  FormControlLabel, Switch, CircularProgress, Grid
-} from '@mui/material';
-import { format, formatDistanceToNow } from 'date-fns';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { formatDistanceToNow } from 'date-fns';
+import { Loader2, Plus, RefreshCw } from 'lucide-react';
 import axios from 'axios';
-import { NewsSource, SourceType, SourceCategory } from '../../lib/models/NewsSource';
+import Layout from '@/components/Layout';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { NewsSource } from '../../lib/models/NewsSource';
+
+type SchedulerState = {
+  enabled: boolean;
+  intervalSeconds: number;
+};
+
+type CrawlerStats = {
+  totalSources: number;
+  activeSources: number;
+  sourcesDueCrawling: number;
+  scheduler?: SchedulerState;
+};
+
+type CrawlRunStatus = {
+  severity: 'success' | 'info' | 'warning' | 'error';
+  message: string;
+  runId?: string | null;
+  details?: string[];
+};
+
+const getAlertVariant = (
+  severity: CrawlRunStatus['severity']
+): 'success' | 'info' | 'warning' | 'destructive' => {
+  if (severity === 'error') {
+    return 'destructive';
+  }
+
+  return severity;
+};
+
+const clampInteger = (value: string, fallback: number, min?: number, max?: number): number => {
+  const parsed = Number.parseInt(value, 10);
+  if (Number.isNaN(parsed)) {
+    return fallback;
+  }
+
+  let next = parsed;
+  if (typeof min === 'number') {
+    next = Math.max(min, next);
+  }
+  if (typeof max === 'number') {
+    next = Math.min(max, next);
+  }
+
+  return next;
+};
+
+const extractAxiosErrorDetail = (error: unknown): string => {
+  if (axios.isAxiosError(error)) {
+    const statusText =
+      typeof error.response?.status === 'number'
+        ? `${error.response.status}${error.response?.statusText ? ` ${error.response.statusText}` : ''}`
+        : null;
+    const responseData = error.response?.data as { detail?: unknown; error?: unknown } | undefined;
+    if (typeof responseData?.detail === 'string' && responseData.detail.trim()) {
+      const detail = responseData.detail.trim();
+      if (detail.toLowerCase() !== 'fetch failed') {
+        return detail;
+      }
+    }
+    if (typeof responseData?.error === 'string' && responseData.error.trim()) {
+      const detail = responseData.error.trim();
+      if (detail.toLowerCase() !== 'fetch failed') {
+        return detail;
+      }
+    }
+
+    if (statusText) {
+      return `Request failed (${statusText})`;
+    }
+
+    return error.message;
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return 'Unexpected error';
+};
 
 // Admin page for managing crawlers and news sources
-export default function CrawlerAdmin() {
-  const [loading, setLoading] = useState(true);
+export default function CrawlerAdmin(): React.JSX.Element {
+  const sourcesRequestIdRef = useRef(0);
+  const statsRequestIdRef = useRef(0);
+  const [sourcesLoading, setSourcesLoading] = useState(true);
+  const [statsLoading, setStatsLoading] = useState(true);
   const [sources, setSources] = useState<NewsSource[]>([]);
-  const [stats, setStats] = useState<any>(null);
+  const [stats, setStats] = useState<CrawlerStats | null>(null);
+  const [sourcesError, setSourcesError] = useState<string | null>(null);
+  const [statsError, setStatsError] = useState<string | null>(null);
   const [openDialog, setOpenDialog] = useState(false);
   const [currentSource, setCurrentSource] = useState<NewsSource | null>(null);
+  const [isSavingSource, setIsSavingSource] = useState(false);
+  const [pendingSourceActionId, setPendingSourceActionId] = useState<string | null>(null);
   const [isRunningCrawl, setIsRunningCrawl] = useState(false);
-  const [crawlResult, setCrawlResult] = useState<string | null>(null);
+  const [isTogglingScheduler, setIsTogglingScheduler] = useState(false);
+  const [crawlStatus, setCrawlStatus] = useState<CrawlRunStatus | null>(null);
   const [schedulerStatus, setSchedulerStatus] = useState<'running' | 'stopped'>('stopped');
-  
-  // Load sources and stats on initial load
-  useEffect(() => {
-    fetchSources();
-    fetchStats();
-  }, []);
-  
-  const fetchSources = async () => {
+
+  const fetchSources = useCallback(async (): Promise<boolean> => {
+    const requestId = ++sourcesRequestIdRef.current;
+    setSourcesLoading(true);
+    setSourcesError(null);
     try {
-      setLoading(true);
       const response = await axios.get('/api/crawler/sources');
-      setSources(response.data);
+      const nextSources = Array.isArray(response.data)
+        ? (response.data as NewsSource[])
+        : [];
+      if (requestId !== sourcesRequestIdRef.current) {
+        return false;
+      }
+      setSources(nextSources);
+      return true;
     } catch (error) {
-      console.error('Error fetching sources:', error);
+      const detail = extractAxiosErrorDetail(error);
+      if (requestId !== sourcesRequestIdRef.current) {
+        return false;
+      }
+      setSources([]);
+      setSourcesError(`Unable to load sources. ${detail}`);
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('Failed to fetch crawler sources', detail);
+      }
+      return false;
     } finally {
-      setLoading(false);
+      if (requestId === sourcesRequestIdRef.current) {
+        setSourcesLoading(false);
+      }
     }
-  };
-  
-  const fetchStats = async () => {
+  }, []);
+
+  const fetchStats = useCallback(async (): Promise<boolean> => {
+    const requestId = ++statsRequestIdRef.current;
+    setStatsLoading(true);
+    setStatsError(null);
     try {
       const response = await axios.get('/api/crawler');
-      setStats(response.data);
+      const crawlerStats = response.data as CrawlerStats;
+      if (requestId !== statsRequestIdRef.current) {
+        return false;
+      }
+      setStats(crawlerStats);
+      setSchedulerStatus(crawlerStats.scheduler?.enabled ? 'running' : 'stopped');
+      return true;
     } catch (error) {
-      console.error('Error fetching crawler stats:', error);
+      const detail = extractAxiosErrorDetail(error);
+      if (requestId !== statsRequestIdRef.current) {
+        return false;
+      }
+      setStats(null);
+      setSchedulerStatus('stopped');
+      setStatsError(`Unable to load crawler status. ${detail}`);
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('Failed to fetch crawler stats', detail);
+      }
+      return false;
+    } finally {
+      if (requestId === statsRequestIdRef.current) {
+        setStatsLoading(false);
+      }
     }
-  };
-  
+  }, []);
+
+  // Load sources and stats on initial load
+  useEffect(() => {
+    void Promise.all([fetchSources(), fetchStats()]);
+  }, [fetchSources, fetchStats]);
+
   const handleOpenDialog = (source: NewsSource | null = null) => {
     if (source) {
       setCurrentSource(source);
@@ -61,455 +219,773 @@ export default function CrawlerAdmin() {
         crawlFrequency: 30,
         isActive: true,
         useProxy: false,
-        respectRobotsTxt: true
+        respectRobotsTxt: true,
       });
     }
     setOpenDialog(true);
   };
-  
+
   const handleCloseDialog = () => {
     setOpenDialog(false);
     setCurrentSource(null);
   };
-  
-  const handleSourceChange = (field: keyof NewsSource, value: any) => {
+
+  const handleSourceChange = <K extends keyof NewsSource>(field: K, value: NewsSource[K]) => {
     if (!currentSource) return;
-    
+
     if (field === 'selector') {
       setCurrentSource({
         ...currentSource,
         selector: {
           ...currentSource.selector,
-          ...value
-        }
+          ...(value as Record<string, string>),
+        },
       });
     } else {
       setCurrentSource({
         ...currentSource,
-        [field]: value
+        [field]: value,
       });
     }
   };
-  
+
   const handleSaveSource = async () => {
-    if (!currentSource) return;
-    
+    if (!currentSource || isSavingSource) return;
+
+    setIsSavingSource(true);
     try {
       await axios.post('/api/crawler/sources', currentSource);
       handleCloseDialog();
-      fetchSources();
-      fetchStats();
+      const [sourcesLoaded, statsLoaded] = await Promise.all([fetchSources(), fetchStats()]);
+      const refreshed = sourcesLoaded && statsLoaded;
+      setCrawlStatus({
+        severity: refreshed ? 'success' : 'warning',
+        message: refreshed
+          ? 'Source saved successfully.'
+          : 'Source saved, but latest status failed to refresh.',
+      });
     } catch (error) {
-      console.error('Error saving source:', error);
+      setCrawlStatus({
+        severity: 'error',
+        message: 'Error saving source.',
+        details: [extractAxiosErrorDetail(error)],
+      });
+    } finally {
+      setIsSavingSource(false);
     }
   };
-  
+
   const handleDeleteSource = async (id: string) => {
     if (!confirm('Are you sure you want to delete this source?')) return;
-    
+    if (pendingSourceActionId) return;
+
+    setPendingSourceActionId(id);
     try {
       await axios.delete(`/api/crawler/sources?id=${id}`);
-      fetchSources();
-      fetchStats();
+      const [sourcesLoaded, statsLoaded] = await Promise.all([fetchSources(), fetchStats()]);
+      const refreshed = sourcesLoaded && statsLoaded;
+      setCrawlStatus({
+        severity: refreshed ? 'info' : 'warning',
+        message: refreshed
+          ? 'Source deleted.'
+          : 'Source deleted, but latest status failed to refresh.',
+      });
     } catch (error) {
-      console.error('Error deleting source:', error);
+      setCrawlStatus({
+        severity: 'error',
+        message: 'Error deleting source.',
+        details: [extractAxiosErrorDetail(error)],
+      });
+    } finally {
+      setPendingSourceActionId(null);
     }
   };
-  
+
   const handleToggleSourceStatus = async (source: NewsSource) => {
+    if (pendingSourceActionId) return;
+
+    setPendingSourceActionId(source.id);
     try {
       await axios.post('/api/crawler/sources', {
         ...source,
-        isActive: !source.isActive
+        isActive: !source.isActive,
       });
-      fetchSources();
-      fetchStats();
+      const [sourcesLoaded, statsLoaded] = await Promise.all([fetchSources(), fetchStats()]);
+      const refreshed = sourcesLoaded && statsLoaded;
+      setCrawlStatus({
+        severity: refreshed ? 'info' : 'warning',
+        message: refreshed
+          ? source.isActive
+            ? 'Source disabled.'
+            : 'Source enabled.'
+          : source.isActive
+            ? 'Source disabled, but latest status failed to refresh.'
+            : 'Source enabled, but latest status failed to refresh.',
+      });
     } catch (error) {
-      console.error('Error updating source status:', error);
+      setCrawlStatus({
+        severity: 'error',
+        message: 'Error updating source status.',
+        details: [extractAxiosErrorDetail(error)],
+      });
+    } finally {
+      setPendingSourceActionId(null);
     }
   };
-  
+
   const handleRunCrawlers = async () => {
     try {
       setIsRunningCrawl(true);
-      setCrawlResult(null);
-      
+      setCrawlStatus(null);
+
       const response = await axios.post('/api/crawler', { action: 'run_now' });
-      setCrawlResult(`Crawl completed. Found ${response.data.newArticles} new articles.`);
-      
-      // Refresh sources and stats
-      fetchSources();
-      fetchStats();
+      const data = response.data as {
+        status?: unknown;
+        newArticles?: unknown;
+        runId?: unknown;
+        errors?: unknown;
+        alreadyRunning?: unknown;
+        error?: unknown;
+      };
+      const statusText =
+        typeof data.status === 'string' && data.status.trim() ? data.status : 'Crawl queued';
+      const runId = typeof data.runId === 'string' ? data.runId : null;
+      const details = Array.isArray(data.errors) ? data.errors.map((entry) => String(entry)) : [];
+      const alreadyRunning = Boolean(data.alreadyRunning);
+      const runFailed = Boolean(data.error);
+      if (alreadyRunning) {
+        setCrawlStatus({
+          severity: 'info',
+          message: statusText,
+          runId,
+        });
+      } else if (runFailed) {
+        setCrawlStatus({
+          severity: 'error',
+          message: statusText,
+          runId,
+          details,
+        });
+      } else {
+        const newArticles = Number(data.newArticles || 0);
+        const message =
+          newArticles > 0 ? `${statusText}. Found ${newArticles} new articles.` : `${statusText}.`;
+        setCrawlStatus({
+          severity: details.length > 0 ? 'warning' : 'success',
+          message,
+          runId,
+          details,
+        });
+      }
+
+      const [sourcesLoaded, statsLoaded] = await Promise.all([fetchSources(), fetchStats()]);
+      if (!(sourcesLoaded && statsLoaded)) {
+        setCrawlStatus((current) => {
+          if (!current || current.severity === 'error') {
+            return current;
+          }
+
+          return {
+            ...current,
+            severity: current.severity === 'success' ? 'warning' : current.severity,
+            details: Array.from(
+              new Set([...(current.details || []), 'Latest source/status refresh failed.'])
+            ),
+          };
+        });
+      }
     } catch (error) {
-      console.error('Error running crawlers:', error);
-      setCrawlResult('Error running crawlers. Check console for details.');
+      setCrawlStatus({
+        severity: 'error',
+        message: 'Error running crawlers.',
+        details: [extractAxiosErrorDetail(error)],
+      });
     } finally {
       setIsRunningCrawl(false);
     }
   };
-  
+
   const handleToggleScheduler = async () => {
+    if (isTogglingScheduler) {
+      return;
+    }
+
+    setIsTogglingScheduler(true);
     try {
       const action = schedulerStatus === 'running' ? 'stop_scheduler' : 'start_scheduler';
-      await axios.post('/api/crawler', { action });
-      setSchedulerStatus(schedulerStatus === 'running' ? 'stopped' : 'running');
+      const response = await axios.post('/api/crawler', { action });
+      const statusText =
+        typeof response.data?.status === 'string' && response.data.status.trim()
+          ? response.data.status
+          : 'Scheduler setting updated.';
+      const statsLoaded = await fetchStats();
+      setCrawlStatus({
+        severity: statsLoaded ? 'info' : 'warning',
+        message: statsLoaded
+          ? statusText
+          : `${statusText} (latest status refresh failed).`,
+      });
     } catch (error) {
-      console.error('Error toggling scheduler:', error);
+      setCrawlStatus({
+        severity: 'error',
+        message: 'Error updating scheduler setting.',
+        details: [extractAxiosErrorDetail(error)],
+      });
+    } finally {
+      setIsTogglingScheduler(false);
     }
   };
-  
+
   return (
-    <Container maxWidth="lg">
-      <Box my={4}>
-        <Typography variant="h4" component="h1" gutterBottom>
-          News Crawler Admin
-        </Typography>
-        
-        <Grid container spacing={3} mb={3}>
-          <Grid item xs={12} md={8}>
-            <Paper elevation={2} sx={{ p: 2, mb: 3 }}>
-              <Typography variant="h6" gutterBottom>Crawler System Status</Typography>
-              {stats ? (
-                <Box>
-                  <Typography>Total Sources: {stats.totalSources}</Typography>
-                  <Typography>Active Sources: {stats.activeSources}</Typography>
-                  <Typography>Sources Due for Crawling: {stats.sourcesDueCrawling}</Typography>
-                  <Box mt={2} display="flex" gap={2}>
-                    <Button 
-                      variant="contained" 
-                      color="primary" 
-                      onClick={handleRunCrawlers}
-                      disabled={isRunningCrawl}
+    <Layout
+      title="News Crawler Admin"
+      description="Manage crawler sources, run crawlers, and monitor scheduler status."
+    >
+      <main className="mx-auto max-w-7xl px-4 py-1 sm:px-0">
+        <div className="space-y-8">
+          <div className="space-y-1">
+            <h1 className="font-display text-3xl font-semibold tracking-tight">News Crawler Admin</h1>
+            <p className="text-sm text-muted-foreground">
+              Manage crawler sources, launch manual runs, and control scheduler state.
+            </p>
+          </div>
+
+        <div className="grid gap-4 lg:grid-cols-3">
+          <Card className="lg:col-span-2">
+            <CardHeader>
+              <CardTitle>Crawler System Status</CardTitle>
+              <CardDescription>Current source and scheduler metrics.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {statsLoading ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading system status...
+                </div>
+              ) : stats ? (
+                <>
+                  <div className="grid gap-2 text-sm sm:grid-cols-2">
+                    <p>
+                      Total Sources: <span className="font-semibold">{stats.totalSources}</span>
+                    </p>
+                    <p>
+                      Active Sources: <span className="font-semibold">{stats.activeSources}</span>
+                    </p>
+                    <p>
+                      Sources Due for Crawling:{' '}
+                      <span className="font-semibold">{stats.sourcesDueCrawling}</span>
+                    </p>
+                    <p>
+                      Scheduler:{' '}
+                      <span className="font-semibold">
+                        {stats.scheduler?.enabled
+                          ? `Active every ${Math.max(1, Math.round((stats.scheduler.intervalSeconds || 0) / 60))} minute(s)`
+                          : 'Disabled (set NEWS_INGEST_INTERVAL_SECONDS > 0 and restart backend)'}
+                      </span>
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      onClick={() => void handleRunCrawlers()}
+                      disabled={isRunningCrawl || statsLoading}
                     >
-                      {isRunningCrawl ? <CircularProgress size={24} /> : 'Run Crawlers Now'}
+                      {isRunningCrawl ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Running...
+                        </>
+                      ) : (
+                        'Run Crawlers Now'
+                      )}
                     </Button>
-                    <Button 
-                      variant="outlined" 
-                      color={schedulerStatus === 'running' ? 'error' : 'success'}
-                      onClick={handleToggleScheduler}
+                    <Button
+                      type="button"
+                      variant={schedulerStatus === 'running' ? 'destructive' : 'outline'}
+                      disabled={isTogglingScheduler || statsLoading}
+                      onClick={() => void handleToggleScheduler()}
                     >
-                      {schedulerStatus === 'running' ? 'Stop Scheduler' : 'Start Scheduler'}
+                      {isTogglingScheduler
+                        ? 'Updating...'
+                        : schedulerStatus === 'running'
+                          ? 'Stop Scheduler'
+                          : 'Start Scheduler'}
                     </Button>
-                  </Box>
-                  {crawlResult && (
-                    <Typography color="text.secondary" mt={2}>
-                      {crawlResult}
-                    </Typography>
-                  )}
-                </Box>
+                  </div>
+                </>
               ) : (
-                <CircularProgress />
+                <Alert variant="destructive">
+                  <AlertTitle>Unable to load crawler status</AlertTitle>
+                  <AlertDescription className="space-y-3">
+                    <p>{statsError || 'The backend is currently unavailable.'}</p>
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="sm"
+                      className="gap-1.5"
+                      disabled={statsLoading}
+                      onClick={() => void fetchStats()}
+                    >
+                      <RefreshCw className="h-4 w-4" />
+                      Retry status fetch
+                    </Button>
+                  </AlertDescription>
+                </Alert>
               )}
-            </Paper>
-          </Grid>
-          <Grid item xs={12} md={4}>
-            <Paper elevation={2} sx={{ p: 2, mb: 3, height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-              <Typography variant="h6" gutterBottom>Add a News Source</Typography>
+
+              {crawlStatus && (
+                <Alert variant={getAlertVariant(crawlStatus.severity)}>
+                  <AlertTitle>Status Update</AlertTitle>
+                  <AlertDescription>
+                    <p>{crawlStatus.message}</p>
+                    {crawlStatus.runId && (
+                      <p className="mt-1 text-xs text-muted-foreground">Run ID: {crawlStatus.runId}</p>
+                    )}
+                    {(crawlStatus.details || []).length > 0 && (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {(crawlStatus.details || []).join(' | ')}
+                      </p>
+                    )}
+                  </AlertDescription>
+                </Alert>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Add a News Source</CardTitle>
+              <CardDescription>Create a crawler source definition.</CardDescription>
+            </CardHeader>
+            <CardContent>
               <Button
-                variant="contained"
-                color="secondary"
+                type="button"
+                className="w-full"
+                variant="secondary"
+                disabled={isSavingSource || pendingSourceActionId !== null}
                 onClick={() => handleOpenDialog()}
-                fullWidth
               >
+                <Plus className="mr-2 h-4 w-4" />
                 Add New Source
               </Button>
-            </Paper>
-          </Grid>
-        </Grid>
-        
-        <Typography variant="h5" gutterBottom mt={4}>News Sources</Typography>
-        
-        {loading ? (
-          <CircularProgress />
-        ) : (
-          <TableContainer component={Paper}>
-            <Table sx={{ minWidth: 650 }}>
-              <TableHead>
-                <TableRow>
-                  <TableCell>Name</TableCell>
-                  <TableCell>URL</TableCell>
-                  <TableCell>Type</TableCell>
-                  <TableCell>Category</TableCell>
-                  <TableCell>Frequency</TableCell>
-                  <TableCell>Last Crawled</TableCell>
-                  <TableCell>Status</TableCell>
-                  <TableCell>Actions</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {sources.map((source) => (
-                  <TableRow key={source.id} hover>
-                    <TableCell>{source.name}</TableCell>
-                    <TableCell>
-                      <a href={source.url} target="_blank" rel="noopener noreferrer">
-                        {source.url.substring(0, 30)}...
-                      </a>
-                    </TableCell>
-                    <TableCell>{source.type}</TableCell>
-                    <TableCell>{source.category}</TableCell>
-                    <TableCell>{source.crawlFrequency} minutes</TableCell>
-                    <TableCell>
-                      {source.lastCrawled ? 
-                        formatDistanceToNow(new Date(source.lastCrawled), { addSuffix: true }) : 
-                        'Never'
-                      }
-                    </TableCell>
-                    <TableCell>
-                      <Chip 
-                        label={source.isActive ? 'Active' : 'Inactive'} 
-                        color={source.isActive ? 'success' : 'default'}
-                        size="small"
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Box display="flex" gap={1}>
-                        <Button 
-                          size="small" 
-                          variant="outlined" 
-                          onClick={() => handleOpenDialog(source)}
-                        >
-                          Edit
-                        </Button>
-                        <Button 
-                          size="small" 
-                          variant="outlined" 
-                          color={source.isActive ? 'error' : 'success'}
-                          onClick={() => handleToggleSourceStatus(source)}
-                        >
-                          {source.isActive ? 'Disable' : 'Enable'}
-                        </Button>
-                        <Button 
-                          size="small" 
-                          variant="outlined" 
-                          color="error"
-                          onClick={() => handleDeleteSource(source.id)}
-                        >
-                          Delete
-                        </Button>
-                      </Box>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                
-                {sources.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={8} align="center">No sources found</TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        )}
-      </Box>
-      
-      {/* Add/Edit Source Dialog */}
-      <Dialog open={openDialog} onClose={handleCloseDialog} fullWidth maxWidth="md">
-        <DialogTitle>
-          {currentSource?.id ? `Edit Source: ${currentSource.name}` : 'Add New Source'}
-        </DialogTitle>
-        <DialogContent>
-          <Box component="form" noValidate autoComplete="off" mt={2} display="flex" flexDirection="column" gap={2}>
-            <Grid container spacing={2}>
-              <Grid item xs={12} md={6}>
-                <TextField
-                  label="Name"
-                  fullWidth
-                  value={currentSource?.name || ''}
-                  onChange={(e) => handleSourceChange('name', e.target.value)}
+            </CardContent>
+          </Card>
+        </div>
+
+        <section className="space-y-3">
+          <h2 className="font-display text-2xl font-semibold tracking-tight">News Sources</h2>
+
+          {sourcesLoading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading sources...
+            </div>
+          ) : sourcesError ? (
+            <Card
+              className="border-destructive/50 bg-destructive/5"
+              role="alert"
+              aria-live="assertive"
+            >
+              <CardContent className="space-y-3 p-4">
+                <p className="text-sm text-destructive">{sourcesError}</p>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  className="gap-1.5"
+                  disabled={sourcesLoading}
+                  onClick={() => void fetchSources()}
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  Retry sources fetch
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card className="overflow-hidden">
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <Table className="min-w-[900px]">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Name</TableHead>
+                        <TableHead>URL</TableHead>
+                        <TableHead>Type</TableHead>
+                        <TableHead>Category</TableHead>
+                        <TableHead>Frequency</TableHead>
+                        <TableHead>Last Crawled</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {sources.map((source) => (
+                        <TableRow key={source.id}>
+                          <TableCell className="font-medium">{source.name}</TableCell>
+                          <TableCell>
+                            <a
+                              href={source.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="block max-w-[18rem] truncate text-primary hover:underline"
+                              title={source.url}
+                            >
+                              {source.url}
+                            </a>
+                          </TableCell>
+                          <TableCell className="uppercase tracking-wide text-muted-foreground">
+                            {source.type}
+                          </TableCell>
+                          <TableCell className="capitalize">{source.category}</TableCell>
+                          <TableCell>{source.crawlFrequency} minutes</TableCell>
+                          <TableCell>
+                            {source.lastCrawled
+                              ? formatDistanceToNow(new Date(source.lastCrawled), { addSuffix: true })
+                              : 'Never'}
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant={source.isActive ? 'default' : 'outline'}
+                              className={
+                                source.isActive
+                                  ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                                  : ''
+                              }
+                            >
+                              {source.isActive ? 'Active' : 'Inactive'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                disabled={pendingSourceActionId !== null || isSavingSource}
+                                onClick={() => handleOpenDialog(source)}
+                              >
+                                Edit
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant={source.isActive ? 'destructive' : 'secondary'}
+                                disabled={pendingSourceActionId !== null || isSavingSource}
+                                onClick={() => void handleToggleSourceStatus(source)}
+                              >
+                                {pendingSourceActionId === source.id
+                                  ? 'Working...'
+                                  : source.isActive
+                                    ? 'Disable'
+                                    : 'Enable'}
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="destructive"
+                                disabled={pendingSourceActionId !== null || isSavingSource}
+                                onClick={() => void handleDeleteSource(source.id)}
+                              >
+                                {pendingSourceActionId === source.id ? 'Working...' : 'Delete'}
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+
+                      {sources.length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={8} className="py-10 text-center text-muted-foreground">
+                            No sources found
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </section>
+        </div>
+
+        <Dialog
+          open={openDialog}
+          onOpenChange={(open) => {
+            if (!open) {
+              handleCloseDialog();
+            }
+          }}
+        >
+          <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
+            <DialogHeader>
+              <DialogTitle>
+                {currentSource?.id ? `Edit Source: ${currentSource.name}` : 'Add New Source'}
+              </DialogTitle>
+              <DialogDescription>
+                Configure crawling behavior and source parsing settings.
+              </DialogDescription>
+            </DialogHeader>
+
+          <form
+            className="grid gap-4 sm:grid-cols-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (isSavingSource) {
+                return;
+              }
+              void handleSaveSource();
+            }}
+          >
+            <div className="space-y-2">
+              <label htmlFor="source-name" className="text-sm font-medium">
+                Name
+              </label>
+              <Input
+                id="source-name"
+                value={currentSource?.name || ''}
+                onChange={(event) => handleSourceChange('name', event.target.value)}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="source-url" className="text-sm font-medium">
+                URL
+              </label>
+              <Input
+                id="source-url"
+                value={currentSource?.url || ''}
+                onChange={(event) => handleSourceChange('url', event.target.value)}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="source-type" className="text-sm font-medium">
+                Type
+              </label>
+              <Select
+                value={currentSource?.type || 'rss'}
+                onValueChange={(value) => handleSourceChange('type', value as NewsSource['type'])}
+              >
+                <SelectTrigger id="source-type" aria-label="Source type">
+                  <SelectValue placeholder="Select source type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="rss">RSS Feed</SelectItem>
+                  <SelectItem value="scrape">Web Scraping</SelectItem>
+                  <SelectItem value="api">API</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="source-category" className="text-sm font-medium">
+                Category
+              </label>
+              <Select
+                value={currentSource?.category || 'finance'}
+                onValueChange={(value) =>
+                  handleSourceChange('category', value as NewsSource['category'])
+                }
+              >
+                <SelectTrigger id="source-category" aria-label="Source category">
+                  <SelectValue placeholder="Select category" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="finance">Finance</SelectItem>
+                  <SelectItem value="economics">Economics</SelectItem>
+                  <SelectItem value="markets">Markets</SelectItem>
+                  <SelectItem value="technology">Technology</SelectItem>
+                  <SelectItem value="general">General</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="crawl-frequency" className="text-sm font-medium">
+                Crawl Frequency (minutes)
+              </label>
+              <Input
+                id="crawl-frequency"
+                type="number"
+                min={5}
+                value={currentSource?.crawlFrequency || 30}
+                onChange={(event) =>
+                  handleSourceChange(
+                    'crawlFrequency',
+                    clampInteger(event.target.value, currentSource?.crawlFrequency || 30, 5)
+                  )
+                }
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="user-agent" className="text-sm font-medium">
+                User Agent
+              </label>
+              <Input
+                id="user-agent"
+                value={currentSource?.userAgent || 'FinanceNewsBot/1.0'}
+                onChange={(event) => handleSourceChange('userAgent', event.target.value)}
+              />
+            </div>
+
+            {currentSource?.type === 'rss' && (
+              <div className="space-y-2 sm:col-span-2">
+                <label htmlFor="rss-url" className="text-sm font-medium">
+                  RSS URL
+                </label>
+                <Input
+                  id="rss-url"
+                  value={currentSource?.rssUrl || ''}
+                  onChange={(event) => handleSourceChange('rssUrl', event.target.value)}
                 />
-              </Grid>
-              
-              <Grid item xs={12} md={6}>
-                <TextField
-                  label="URL"
-                  fullWidth
-                  value={currentSource?.url || ''}
-                  onChange={(e) => handleSourceChange('url', e.target.value)}
+              </div>
+            )}
+
+            {currentSource?.type === 'api' && (
+              <>
+                <div className="space-y-2 sm:col-span-2 md:col-span-1">
+                  <label htmlFor="api-endpoint" className="text-sm font-medium">
+                    API Endpoint
+                  </label>
+                  <Input
+                    id="api-endpoint"
+                    value={currentSource?.apiEndpoint || ''}
+                    onChange={(event) => handleSourceChange('apiEndpoint', event.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label htmlFor="api-key" className="text-sm font-medium">
+                    API Key
+                  </label>
+                  <Input
+                    id="api-key"
+                    value={currentSource?.apiKey || ''}
+                    onChange={(event) => handleSourceChange('apiKey', event.target.value)}
+                  />
+                </div>
+              </>
+            )}
+
+            {currentSource?.type === 'scrape' && (
+              <>
+                <div className="sm:col-span-2">
+                  <p className="text-sm font-semibold">Selectors for HTML parsing</p>
+                </div>
+                <div className="space-y-2">
+                  <label htmlFor="selector-title" className="text-sm font-medium">
+                    Title Selector
+                  </label>
+                  <Input
+                    id="selector-title"
+                    value={currentSource?.selector?.title || 'h1'}
+                    onChange={(event) =>
+                      handleSourceChange('selector', { title: event.target.value })
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label htmlFor="selector-content" className="text-sm font-medium">
+                    Content Selector
+                  </label>
+                  <Input
+                    id="selector-content"
+                    value={currentSource?.selector?.content || 'article, .article-body'}
+                    onChange={(event) =>
+                      handleSourceChange('selector', { content: event.target.value })
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label htmlFor="selector-date" className="text-sm font-medium">
+                    Date Selector
+                  </label>
+                  <Input
+                    id="selector-date"
+                    value={currentSource?.selector?.date || 'time, .date'}
+                    onChange={(event) => handleSourceChange('selector', { date: event.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label htmlFor="selector-author" className="text-sm font-medium">
+                    Author Selector
+                  </label>
+                  <Input
+                    id="selector-author"
+                    value={currentSource?.selector?.author || '.author, .byline'}
+                    onChange={(event) =>
+                      handleSourceChange('selector', { author: event.target.value })
+                    }
+                  />
+                </div>
+              </>
+            )}
+
+            <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-2">
+              <label className="flex items-center gap-3 text-sm font-medium">
+                <Switch
+                  checked={currentSource?.isActive || false}
+                  onCheckedChange={(checked) => handleSourceChange('isActive', checked)}
                 />
-              </Grid>
-              
-              <Grid item xs={12} md={6}>
-                <FormControl fullWidth>
-                  <InputLabel>Type</InputLabel>
-                  <Select
-                    value={currentSource?.type || 'rss'}
-                    label="Type"
-                    onChange={(e) => handleSourceChange('type', e.target.value)}
-                  >
-                    <MenuItem value="rss">RSS Feed</MenuItem>
-                    <MenuItem value="scrape">Web Scraping</MenuItem>
-                    <MenuItem value="api">API</MenuItem>
-                  </Select>
-                </FormControl>
-              </Grid>
-              
-              <Grid item xs={12} md={6}>
-                <FormControl fullWidth>
-                  <InputLabel>Category</InputLabel>
-                  <Select
-                    value={currentSource?.category || 'finance'}
-                    label="Category"
-                    onChange={(e) => handleSourceChange('category', e.target.value)}
-                  >
-                    <MenuItem value="finance">Finance</MenuItem>
-                    <MenuItem value="economics">Economics</MenuItem>
-                    <MenuItem value="markets">Markets</MenuItem>
-                    <MenuItem value="technology">Technology</MenuItem>
-                    <MenuItem value="general">General</MenuItem>
-                  </Select>
-                </FormControl>
-              </Grid>
-              
-              <Grid item xs={12} md={6}>
-                <TextField
-                  label="Crawl Frequency (minutes)"
-                  fullWidth
+                Active
+              </label>
+            </div>
+
+            <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-2">
+              <label className="flex items-center gap-3 text-sm font-medium">
+                <Switch
+                  checked={currentSource?.useProxy || false}
+                  onCheckedChange={(checked) => handleSourceChange('useProxy', checked)}
+                />
+                Use Proxy
+              </label>
+            </div>
+
+            <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-2">
+              <label className="flex items-center gap-3 text-sm font-medium">
+                <Switch
+                  checked={currentSource?.respectRobotsTxt ?? true}
+                  onCheckedChange={(checked) => handleSourceChange('respectRobotsTxt', checked)}
+                />
+                Respect robots.txt
+              </label>
+            </div>
+
+            {currentSource?.type === 'scrape' && (
+              <div className="space-y-2 sm:col-span-2 md:col-span-1">
+                <label htmlFor="wait-time" className="text-sm font-medium">
+                  Wait Time (ms)
+                </label>
+                <Input
+                  id="wait-time"
                   type="number"
-                  InputProps={{ inputProps: { min: 5 } }}
-                  value={currentSource?.crawlFrequency || 30}
-                  onChange={(e) => handleSourceChange('crawlFrequency', parseInt(e.target.value))}
-                />
-              </Grid>
-              
-              <Grid item xs={12} md={6}>
-                <TextField
-                  label="User Agent"
-                  fullWidth
-                  value={currentSource?.userAgent || 'FinanceNewsBot/1.0'}
-                  onChange={(e) => handleSourceChange('userAgent', e.target.value)}
-                />
-              </Grid>
-              
-              {currentSource?.type === 'rss' && (
-                <Grid item xs={12}>
-                  <TextField
-                    label="RSS URL"
-                    fullWidth
-                    value={currentSource?.rssUrl || ''}
-                    onChange={(e) => handleSourceChange('rssUrl', e.target.value)}
-                  />
-                </Grid>
-              )}
-              
-              {currentSource?.type === 'api' && (
-                <>
-                  <Grid item xs={12} md={8}>
-                    <TextField
-                      label="API Endpoint"
-                      fullWidth
-                      value={currentSource?.apiEndpoint || ''}
-                      onChange={(e) => handleSourceChange('apiEndpoint', e.target.value)}
-                    />
-                  </Grid>
-                  <Grid item xs={12} md={4}>
-                    <TextField
-                      label="API Key"
-                      fullWidth
-                      value={currentSource?.apiKey || ''}
-                      onChange={(e) => handleSourceChange('apiKey', e.target.value)}
-                    />
-                  </Grid>
-                </>
-              )}
-              
-              {currentSource?.type === 'scrape' && (
-                <>
-                  <Grid item xs={12}>
-                    <Typography variant="subtitle1">Selectors for HTML parsing</Typography>
-                  </Grid>
-                  <Grid item xs={12} md={6}>
-                    <TextField
-                      label="Title Selector"
-                      fullWidth
-                      value={currentSource?.selector?.title || 'h1'}
-                      onChange={(e) => handleSourceChange('selector', { title: e.target.value })}
-                    />
-                  </Grid>
-                  <Grid item xs={12} md={6}>
-                    <TextField
-                      label="Content Selector"
-                      fullWidth
-                      value={currentSource?.selector?.content || 'article, .article-body'}
-                      onChange={(e) => handleSourceChange('selector', { content: e.target.value })}
-                    />
-                  </Grid>
-                  <Grid item xs={12} md={6}>
-                    <TextField
-                      label="Date Selector"
-                      fullWidth
-                      value={currentSource?.selector?.date || 'time, .date'}
-                      onChange={(e) => handleSourceChange('selector', { date: e.target.value })}
-                    />
-                  </Grid>
-                  <Grid item xs={12} md={6}>
-                    <TextField
-                      label="Author Selector"
-                      fullWidth
-                      value={currentSource?.selector?.author || '.author, .byline'}
-                      onChange={(e) => handleSourceChange('selector', { author: e.target.value })}
-                    />
-                  </Grid>
-                </>
-              )}
-              
-              <Grid item xs={12} md={4}>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={currentSource?.isActive || false}
-                      onChange={(e) => handleSourceChange('isActive', e.target.checked)}
-                    />
+                  min={0}
+                  max={10000}
+                  value={currentSource?.waitTime || 2000}
+                  onChange={(event) =>
+                    handleSourceChange(
+                      'waitTime',
+                      clampInteger(event.target.value, currentSource?.waitTime || 2000, 0, 10000)
+                    )
                   }
-                  label="Active"
                 />
-              </Grid>
-              
-              <Grid item xs={12} md={4}>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={currentSource?.useProxy || false}
-                      onChange={(e) => handleSourceChange('useProxy', e.target.checked)}
-                    />
-                  }
-                  label="Use Proxy"
-                />
-              </Grid>
-              
-              <Grid item xs={12} md={4}>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={currentSource?.respectRobotsTxt || true}
-                      onChange={(e) => handleSourceChange('respectRobotsTxt', e.target.checked)}
-                    />
-                  }
-                  label="Respect robots.txt"
-                />
-              </Grid>
-              
-              {currentSource?.type === 'scrape' && (
-                <Grid item xs={12} md={6}>
-                  <TextField
-                    label="Wait Time (ms)"
-                    fullWidth
-                    type="number"
-                    InputProps={{ inputProps: { min: 0, max: 10000 } }}
-                    value={currentSource?.waitTime || 2000}
-                    onChange={(e) => handleSourceChange('waitTime', parseInt(e.target.value))}
-                  />
-                </Grid>
-              )}
-            </Grid>
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCloseDialog}>Cancel</Button>
-          <Button onClick={handleSaveSource} variant="contained" color="primary">
-            Save
-          </Button>
-        </DialogActions>
-      </Dialog>
-    </Container>
+              </div>
+            )}
+          </form>
+
+            <DialogFooter>
+              <Button type="button" variant="outline" disabled={isSavingSource} onClick={handleCloseDialog}>
+                Cancel
+              </Button>
+              <Button type="button" disabled={isSavingSource} onClick={() => void handleSaveSource()}>
+                {isSavingSource ? 'Saving...' : 'Save'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </main>
+    </Layout>
   );
 }

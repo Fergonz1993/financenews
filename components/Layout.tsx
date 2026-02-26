@@ -1,6 +1,5 @@
-import { ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import Head from 'next/head';
-import { Container, Box } from '@mui/material';
 import Navigation from './Navigation';
 
 interface LayoutProps {
@@ -9,7 +8,11 @@ interface LayoutProps {
   description?: string;
 }
 
-const Layout = ({ children, title = 'Financial News Platform', description = 'Real-time financial news analysis with AI' }: LayoutProps) => {
+const Layout = ({
+  children,
+  title = 'Financial News Platform',
+  description = 'Real-time financial news analysis with AI',
+}: LayoutProps): React.JSX.Element => {
   return (
     <>
       <Head>
@@ -18,22 +21,22 @@ const Layout = ({ children, title = 'Financial News Platform', description = 'Re
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <link rel="icon" href="/favicon.ico" />
       </Head>
-      
-      <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+
+      <div className="relative flex min-h-screen flex-col overflow-x-clip">
+        <div className="pointer-events-none absolute inset-0 -z-10 bg-grid-subtle opacity-50" />
         <Navigation />
-        
-        <Container component="main" maxWidth="lg" sx={{ flexGrow: 1, py: 4 }}>
+
+        <main className="mx-auto w-full max-w-6xl flex-1 px-4 pb-12 pt-8 sm:px-6 lg:px-8">
           {children}
-        </Container>
-        
-        <Box component="footer" sx={{ py: 3, px: 2, mt: 'auto', backgroundColor: 'background.paper' }}>
-          <Container maxWidth="lg">
-            <Box sx={{ textAlign: 'center', color: 'text.secondary', fontSize: '0.875rem' }}>
-              © {new Date().getFullYear()} Financial News Platform. All rights reserved.
-            </Box>
-          </Container>
-        </Box>
-      </Box>
+        </main>
+
+        <footer className="border-t border-border/60 bg-background/70 px-4 py-6 backdrop-blur-sm sm:px-6">
+          <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
+            <p>© {new Date().getFullYear()} Financial News Platform.</p>
+            <p>Built for real-time market intelligence.</p>
+          </div>
+        </footer>
+      </div>
     </>
   );
 };

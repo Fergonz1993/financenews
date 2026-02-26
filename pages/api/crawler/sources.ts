@@ -1,50 +1,212 @@
 import { NextApiRequest, NextApiResponse } from 'next';
-import { crawlerManager } from '../../../lib/crawlers/CrawlerManager';
-import { NewsSource } from '../../../lib/models/NewsSource';
+import {
+  enforceMethod,
+  fastApiRequest,
+  isBackendUnavailableError,
+  sendProxyError,
+} from '../_utils/fastapiProxy';
+import {
+  deleteLocalSource,
+  isLocalApiFallbackEnabled,
+  loadLocalSources,
+  upsertLocalSource,
+} from '../_utils/localDataFallback';
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
+type SourceRow = {
+  id: string;
+  source_id?: number;
+  name: string;
+  url: string;
+  source_type?: string;
+  source_category?: string | null;
+  crawl_interval_minutes?: number;
+  enabled?: boolean;
+};
+
+type HealthRow = {
+  source_id?: number;
+  last_success_at?: string | null;
+};
+
+type CrawlerSourcePayload = {
+  id?: string;
+  name?: string;
+  url?: string;
+  type?: string;
+  category?: string;
+  crawlFrequency?: number;
+  isActive?: boolean;
+};
+
+function mapSourceForAdmin(source: SourceRow, healthMap: Map<number, HealthRow>) {
+  const sourceId = source.source_id;
+  const sourceHealth =
+    typeof sourceId === 'number' ? healthMap.get(sourceId) : undefined;
+  return {
+    id: source.id,
+    name: source.name,
+    url: source.url,
+    type: source.source_type || 'rss',
+    category: source.source_category || 'news',
+    crawlFrequency: source.crawl_interval_minutes || 30,
+    isActive: Boolean(source.enabled),
+    useProxy: false,
+    respectRobotsTxt: true,
+    lastCrawled: sourceHealth?.last_success_at || null,
+  };
+}
+
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  if (!enforceMethod(req, res, ['GET', 'POST', 'DELETE'])) {
+    return;
+  }
+
   try {
-    // GET - List all sources
     if (req.method === 'GET') {
-      const sources = crawlerManager.getSources();
-      return res.status(200).json(sources);
+      const [sources, health] = await Promise.all([
+        fastApiRequest<SourceRow[]>({
+          path: '/api/sources',
+          method: 'GET',
+          query: { include_disabled: 'true' },
+          req,
+        }),
+        fastApiRequest<HealthRow[]>({
+          path: '/api/ingestion/health',
+          method: 'GET',
+          req,
+        }),
+      ]);
+      const healthMap = new Map<number, HealthRow>();
+      health.forEach((item) => {
+        if (typeof item.source_id === 'number') {
+          healthMap.set(item.source_id, item);
+        }
+      });
+      res.status(200).json(sources.map((source) => mapSourceForAdmin(source, healthMap)));
+      return;
     }
-    
-    // POST - Add a new source or update an existing one
+
     if (req.method === 'POST') {
-      const sourceData = req.body as NewsSource;
-      
-      // Validate required fields
+      const sourceData = req.body as CrawlerSourcePayload;
       if (!sourceData.name || !sourceData.url || !sourceData.type) {
-        return res.status(400).json({ error: 'Missing required fields' });
+        res.status(400).json({ error: 'Missing required fields' });
+        return;
       }
-      
-      const source = crawlerManager.addOrUpdateSource(sourceData);
-      return res.status(200).json(source);
+
+      const upserted = await fastApiRequest<SourceRow>({
+        path: '/api/sources',
+        method: 'POST',
+        body: {
+          id: sourceData.id || undefined,
+          name: sourceData.name,
+          url: sourceData.url,
+          source_type: sourceData.type,
+          source_category: sourceData.category || 'news',
+          crawl_interval_minutes: Number(sourceData.crawlFrequency || 30),
+          enabled: sourceData.isActive !== false,
+          connector_type: sourceData.type,
+          legal_basis: 'public_web_feed',
+          rate_profile: 'standard',
+        },
+        req,
+      });
+      res.status(200).json({
+        id: upserted.id,
+        name: upserted.name,
+        url: upserted.url,
+        type: upserted.source_type || 'rss',
+        category: upserted.source_category || 'news',
+        crawlFrequency: upserted.crawl_interval_minutes || 30,
+        isActive: Boolean(upserted.enabled),
+      });
+      return;
     }
-    
-    // DELETE - Remove a source
-    if (req.method === 'DELETE') {
-      const { id } = req.query;
-      
-      if (!id || typeof id !== 'string') {
-        return res.status(400).json({ error: 'Source ID is required' });
-      }
-      
-      const removed = crawlerManager.removeSource(id);
-      
-      if (removed) {
-        return res.status(200).json({ status: 'Source removed' });
-      } else {
-        return res.status(404).json({ error: 'Source not found' });
-      }
+
+    const idRaw = req.query.id;
+    const sourceId = Array.isArray(idRaw) ? idRaw[0] : idRaw;
+    if (!sourceId) {
+      res.status(400).json({ error: 'Source ID is required' });
+      return;
     }
-    
-    // Method not allowed
-    res.setHeader('Allow', ['GET', 'POST', 'DELETE']);
-    return res.status(405).end(`Method ${req.method} Not Allowed`);
+
+    await fastApiRequest({
+      path: `/api/sources/${encodeURIComponent(sourceId)}`,
+      method: 'DELETE',
+      req,
+    });
+    res.status(200).json({ status: 'Source removed' });
   } catch (error) {
-    console.error('Sources API error:', error);
-    return res.status(500).json({ error: 'Internal server error' });
+    if (isLocalApiFallbackEnabled() && isBackendUnavailableError(error)) {
+      if (req.method === 'GET') {
+        const localSources = loadLocalSources().map((source) => ({
+          id: source.id,
+          name: source.name,
+          url: source.url,
+          type: source.type,
+          category: source.category || 'news',
+          crawlFrequency: source.crawlFrequency || 30,
+          isActive: source.isActive,
+          useProxy: source.useProxy,
+          respectRobotsTxt: source.respectRobotsTxt,
+          lastCrawled: source.lastCrawled || null,
+          selector: source.selector,
+          rssUrl: source.rssUrl,
+          apiEndpoint: source.apiEndpoint,
+          apiKey: source.apiKey,
+          userAgent: source.userAgent,
+          waitTime: source.waitTime,
+        }));
+        res.setHeader('X-Data-Source', 'local-fallback');
+        res.status(200).json(localSources);
+        return;
+      }
+
+      if (req.method === 'POST') {
+        const sourceData = req.body as CrawlerSourcePayload;
+        if (!sourceData.name || !sourceData.url || !sourceData.type) {
+          res.status(400).json({ error: 'Missing required fields' });
+          return;
+        }
+
+        const upserted = upsertLocalSource({
+          id: sourceData.id,
+          name: sourceData.name,
+          url: sourceData.url,
+          type: sourceData.type,
+          category: sourceData.category || 'news',
+          crawlFrequency: Number(sourceData.crawlFrequency || 30),
+          isActive: sourceData.isActive !== false,
+        });
+        res.setHeader('X-Data-Source', 'local-fallback');
+        res.status(200).json({
+          id: upserted.id,
+          name: upserted.name,
+          url: upserted.url,
+          type: upserted.type,
+          category: upserted.category,
+          crawlFrequency: upserted.crawlFrequency,
+          isActive: upserted.isActive,
+        });
+        return;
+      }
+
+      if (req.method === 'DELETE') {
+        const idRaw = req.query.id;
+        const sourceId = Array.isArray(idRaw) ? idRaw[0] : idRaw;
+        if (!sourceId) {
+          res.status(400).json({ error: 'Source ID is required' });
+          return;
+        }
+        const removed = deleteLocalSource(sourceId);
+        if (!removed) {
+          res.status(404).json({ error: 'Source not found' });
+          return;
+        }
+        res.setHeader('X-Data-Source', 'local-fallback');
+        res.status(200).json({ status: 'Source removed' });
+        return;
+      }
+    }
+    sendProxyError(res, error, 'Sources API proxy error');
   }
 }

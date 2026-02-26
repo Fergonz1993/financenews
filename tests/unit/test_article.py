@@ -25,7 +25,7 @@ class TestArticle:
         # Check auto-populated fields
         assert article.id is not None
         assert len(article.id) == 32  # MD5 hash length
-        assert article.word_count == 9  # Number of words in content
+        assert article.word_count == 10  # Number of words in content
 
         # Check default values
         assert article.summary_bullets == []

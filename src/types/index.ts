@@ -26,6 +26,27 @@ export interface Article {
   is_saved?: boolean;
 }
 
+export interface ArticleSummary {
+  id?: string;
+  title: string;
+  source: string;
+  published_at: string;
+  summarized_headline?: string;
+  summary_bullets?: string[];
+  sentiment?: string;
+  sentiment_score?: number;
+  market_impact_score?: number;
+  topics?: string[];
+  url?: string;
+}
+
+export interface ArticlesResponse {
+  articles: ArticleSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export interface ArticleFilters {
   source?: string;
   sentiment?: string;

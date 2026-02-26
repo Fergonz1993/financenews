@@ -14,10 +14,10 @@ echo FastAPI backend started at http://localhost:8000
 REM Wait a moment before starting frontend
 timeout /t 3 /nobreak > nul
 
-REM Start React frontend
-echo Starting React frontend server...
-start cmd /k "cd frontend && npm start"
-echo React frontend starting at http://localhost:3000
+REM Start Next.js frontend
+echo Starting Next.js frontend server...
+start cmd /k "cd /d . && bun run dev"
+echo Next.js frontend starting at http://localhost:3000
 
 echo.
 echo Both servers are starting up!

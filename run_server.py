@@ -34,17 +34,17 @@ def start_backend():
     return True
 
 def start_frontend():
-    """Start the React frontend development server."""
-    os.chdir(current_dir / "frontend")
-    print("Starting React frontend server...")
+    """Start the Next.js frontend development server."""
+    os.chdir(current_dir)
+    print("Starting Next.js frontend server...")
     try:
         subprocess.Popen(
-            ["npm", "start"],
-            cwd=str(current_dir / "frontend")
+            ["bun", "run", "dev"],
+            cwd=str(current_dir),
         )
-        print("✅ React frontend starting at http://localhost:3000")
+        print("✅ Next.js frontend starting at http://localhost:3000")
     except Exception as e:
-        print(f"❌ Failed to start React frontend: {e}")
+        print(f"❌ Failed to start Next.js frontend: {e}")
         return False
     
     return True

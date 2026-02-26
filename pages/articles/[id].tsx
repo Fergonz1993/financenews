@@ -1,23 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
-import { 
-  Box, 
-  Typography, 
-  Paper, 
-  Chip, 
-  Grid, 
-  Divider, 
-  Button,
-  CircularProgress,
-  Link as MuiLink
-} from '@mui/material';
-import {
-  BookmarkBorder as BookmarkIcon,
-  Bookmark as BookmarkFilledIcon,
-  ArrowBack as ArrowBackIcon,
-  Share as ShareIcon
-} from '@mui/icons-material';
+import { ArrowLeft, Bookmark, BookmarkCheck, ExternalLink, Share2 } from 'lucide-react';
 import Layout from '../../components/Layout';
+import { Badge } from '../../components/ui/badge';
+import { Button } from '../../components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 
 // Article type definition
 type Article = {
@@ -40,6 +27,9 @@ type Article = {
 export default function ArticlePage() {
   const router = useRouter();
   const { id } = router.query;
+  const userId =
+    (Array.isArray(router.query.user_id) ? router.query.user_id[0] : router.query.user_id) ||
+    'user1';
   const [article, setArticle] = useState<Article | null>(null);
   const [loading, setLoading] = useState(true);
   const [saved, setSaved] = useState(false);
@@ -50,7 +40,8 @@ export default function ArticlePage() {
     const fetchArticle = async () => {
       setLoading(true);
       try {
-        const response = await fetch(`/api/articles/${id}?user_id=user1`);
+        const articleId = Array.isArray(id) ? id[0] : String(id);
+        const response = await fetch(`/api/articles/${encodeURIComponent(articleId)}?user_id=${encodeURIComponent(userId)}`);
         if (!response.ok) throw new Error('Failed to fetch article');
         const data = await response.json();
         setArticle(data);
@@ -63,13 +54,13 @@ export default function ArticlePage() {
     };
 
     fetchArticle();
-  }, [id]);
+  }, [id, userId]);
 
   const toggleSaved = async () => {
     if (!article) return;
     
     try {
-      const endpoint = `/api/users/user1/saved-articles/${article.id}`;
+      const endpoint = `/api/users/${encodeURIComponent(userId)}/saved-articles/${encodeURIComponent(article.id)}`;
       const method = saved ? 'DELETE' : 'POST';
       
       const response = await fetch(endpoint, { method });
@@ -81,21 +72,66 @@ export default function ArticlePage() {
     }
   };
 
-  const getSentimentColor = (sentiment?: string) => {
-    switch (sentiment) {
-      case 'positive': return 'success';
-      case 'negative': return 'error';
-      case 'neutral': return 'warning';
-      default: return 'default';
+  const sentimentStyle = useMemo(() => {
+    if (!article?.sentiment) {
+      return {
+        className: 'border-border/80 bg-muted text-muted-foreground',
+        label: '',
+      };
     }
+
+    switch (article.sentiment.toLowerCase()) {
+      case 'positive':
+        return {
+          className:
+            'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+          label: 'Positive',
+        };
+      case 'negative':
+        return {
+          className: 'border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300',
+          label: 'Negative',
+        };
+      case 'neutral':
+        return {
+          className:
+            'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300',
+          label: 'Neutral',
+        };
+      default:
+        return {
+          className: 'border-border/80 bg-muted text-muted-foreground',
+          label: article.sentiment,
+        };
+    }
+  }, [article?.sentiment]);
+
+  const marketImpact = article?.market_impact_score;
+  const marketImpactPercent = Math.max(
+    0,
+    Math.min(100, Number(((marketImpact ?? 0) * 100).toFixed(2)))
+  );
+
+  const getMarketImpactClassName = (value: number): string => {
+    if (value > 70) return 'bg-rose-500';
+    if (value > 40) return 'bg-amber-500';
+    return 'bg-emerald-500';
+  };
+
+  const formatPublishedAt = (value: string): string => {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      return value;
+    }
+    return parsed.toLocaleString();
   };
 
   if (loading) {
     return (
       <Layout title="Loading Article" description="Loading article...">
-        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
-          <CircularProgress />
-        </Box>
+        <div className="flex min-h-[50vh] items-center justify-center">
+          <div className="h-10 w-10 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
+        </div>
       </Layout>
     );
   }
@@ -103,175 +139,190 @@ export default function ArticlePage() {
   if (!article) {
     return (
       <Layout title="Article Not Found" description="The requested article could not be found">
-        <Box sx={{ textAlign: 'center', py: 5 }}>
-          <Typography variant="h5" gutterBottom>Article Not Found</Typography>
-          <Button 
-            startIcon={<ArrowBackIcon />}
-            variant="contained" 
+        <div className="py-10 text-center">
+          <h1 className="font-display text-2xl font-semibold tracking-tight">Article Not Found</h1>
+          <Button
+            className="mt-4 gap-2"
             onClick={() => router.push('/articles')}
-            sx={{ mt: 2 }}
           >
+            <ArrowLeft className="h-4 w-4" />
             Back to Articles
           </Button>
-        </Box>
+        </div>
       </Layout>
     );
   }
 
   return (
     <Layout title={article.title} description={article.summarized_headline || article.title}>
-      <Button 
-        startIcon={<ArrowBackIcon />}
-        variant="outlined" 
+      <Button
+        variant="outline"
+        className="mb-4 gap-2"
         onClick={() => router.push('/articles')}
-        sx={{ mb: 3 }}
       >
+        <ArrowLeft className="h-4 w-4" />
         Back to Articles
       </Button>
-      
-      <Paper sx={{ p: 4 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-          <Typography variant="caption" color="text.secondary">
-            {article.source} • {new Date(article.published_at).toLocaleString()}
-          </Typography>
-          <Box>
-            <Button 
-              startIcon={saved ? <BookmarkFilledIcon /> : <BookmarkIcon />}
-              onClick={toggleSaved}
-              color={saved ? 'primary' : 'inherit'}
-              size="small"
-            >
-              {saved ? 'Saved' : 'Save'}
-            </Button>
-            <Button 
-              startIcon={<ShareIcon />}
-              size="small"
-              onClick={() => {
-                navigator.clipboard.writeText(window.location.href);
-                alert('Link copied to clipboard!');
-              }}
-            >
-              Share
-            </Button>
-          </Box>
-        </Box>
 
-        <Typography variant="h4" component="h1" gutterBottom>
-          {article.title}
-        </Typography>
-        
-        {/* Sentiment Indicator */}
-        {article.sentiment && (
-          <Chip 
-            label={`${article.sentiment} sentiment (${(article.sentiment_score || 0).toFixed(2)})`} 
-            color={getSentimentColor(article.sentiment) as any}
-            sx={{ mb: 3 }}
-          />
-        )}
-        
-        {/* AI Summary */}
-        <Paper variant="outlined" sx={{ p: 3, mb: 4, bgcolor: 'background.paper' }}>
-          <Typography variant="h6" gutterBottom>
-            AI Summary
-          </Typography>
-          <Typography variant="body1" paragraph>
-            {article.summarized_headline}
-          </Typography>
-          <Typography variant="subtitle2" gutterBottom>
-            Key Points:
-          </Typography>
-          <Box component="ul" sx={{ pl: 2 }}>
-            {article.summary_bullets?.map((bullet, index) => (
-              <Typography component="li" key={index} paragraph>
-                {bullet}
-              </Typography>
-            ))}
-          </Box>
-        </Paper>
-        
-        {/* Full Article Content */}
-        <Typography variant="h6" gutterBottom>
-          Full Article
-        </Typography>
-        <Typography variant="body1" paragraph>
-          {article.content}
-        </Typography>
-        
-        <Box sx={{ mt: 4 }}>
-          <MuiLink href={article.url} target="_blank" rel="noopener noreferrer">
-            Read original article at {article.source}
-          </MuiLink>
-        </Box>
-        
-        <Divider sx={{ my: 4 }} />
-        
-        {/* Related Information */}
-        <Grid container spacing={3}>
-          <Grid item xs={12} md={6}>
-            <Typography variant="subtitle1" gutterBottom>
-              Key Entities
-            </Typography>
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-              {article.key_entities?.map(entity => (
-                <Chip 
-                  key={entity} 
-                  label={entity} 
-                  variant="outlined" 
-                  size="small"
-                />
-              ))}
-            </Box>
-          </Grid>
-          <Grid item xs={12} md={6}>
-            <Typography variant="subtitle1" gutterBottom>
-              Topics
-            </Typography>
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-              {article.topics?.map(topic => (
-                <Chip 
-                  key={topic} 
-                  label={topic} 
-                  color="primary" 
-                  variant="outlined"
-                  size="small"
-                />
-              ))}
-            </Box>
-          </Grid>
-        </Grid>
-        
-        {article.market_impact_score !== undefined && (
-          <Box sx={{ mt: 4 }}>
-            <Typography variant="subtitle1" gutterBottom>
-              Market Impact Score
-            </Typography>
-            <Box 
-              sx={{ 
-                height: 10, 
-                width: '100%', 
-                bgcolor: 'grey.200',
-                borderRadius: 5,
-                overflow: 'hidden'
-              }}
-            >
-              <Box 
-                sx={{ 
-                  height: '100%', 
-                  width: `${article.market_impact_score * 100}%`,
-                  bgcolor: article.market_impact_score > 0.7 ? 'error.main' : 
-                           article.market_impact_score > 0.4 ? 'warning.main' : 
-                           'success.main',
+      <Card className="border-border/70 bg-card/85 backdrop-blur-sm">
+        <CardHeader className="space-y-4">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <p className="text-xs text-muted-foreground">
+              {article.source} • {formatPublishedAt(article.published_at)}
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant={saved ? 'default' : 'outline'}
+                size="sm"
+                className="gap-1.5"
+                onClick={toggleSaved}
+              >
+                {saved ? <BookmarkCheck className="h-4 w-4" /> : <Bookmark className="h-4 w-4" />}
+                {saved ? 'Saved' : 'Save'}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={async () => {
+                  try {
+                    if (!navigator.clipboard?.writeText) {
+                      throw new Error('Clipboard API unavailable');
+                    }
+                    await navigator.clipboard.writeText(window.location.href);
+                    alert('Link copied to clipboard!');
+                  } catch (error) {
+                    console.error('Error copying link:', error);
+                    alert('Unable to copy link. Please copy the URL from your browser.');
+                  }
                 }}
-              />
-            </Box>
-            <Typography variant="caption" sx={{ mt: 1, display: 'block' }}>
-              {article.market_impact_score < 0.3 ? 'Low impact' : 
-               article.market_impact_score < 0.7 ? 'Moderate impact' : 
-               'High impact'} - {(article.market_impact_score * 100).toFixed(0)}%
-            </Typography>
-          </Box>
+              >
+                <Share2 className="h-4 w-4" />
+                Share
+              </Button>
+            </div>
+          </div>
+
+          <CardTitle className="text-balance text-2xl sm:text-3xl">{article.title}</CardTitle>
+        </CardHeader>
+
+        <CardContent className="space-y-6">
+        {article.sentiment && (
+          <Badge variant="outline" className={sentimentStyle.className}>
+            {sentimentStyle.label} sentiment ({(article.sentiment_score ?? 0).toFixed(2)})
+          </Badge>
         )}
-      </Paper>
+
+        {/* AI Summary */}
+          <Card className="border-border/70 bg-background/70">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg">AI Summary</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {article.summarized_headline ? (
+                <p className="text-sm text-foreground sm:text-base">{article.summarized_headline}</p>
+              ) : (
+                <p className="text-sm text-muted-foreground">No summary available for this article.</p>
+              )}
+
+              {article.summary_bullets && article.summary_bullets.length > 0 && (
+                <>
+                  <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                    Key Points
+                  </h2>
+                  <ul className="list-disc space-y-2 pl-5 text-sm text-foreground">
+                    {article.summary_bullets.map((bullet, index) => (
+                      <li key={`${bullet}-${index}`}>{bullet}</li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </CardContent>
+          </Card>
+
+        {/* Full Article Content */}
+          <section className="space-y-2">
+            <h2 className="text-xl font-semibold">Full Article</h2>
+            <p className="whitespace-pre-line text-sm leading-relaxed text-foreground sm:text-base">
+              {article.content}
+            </p>
+          </section>
+
+          <div>
+            <a
+              href={article.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-sm font-medium text-primary underline-offset-4 hover:underline"
+            >
+              <ExternalLink className="h-4 w-4" />
+              Read original article at {article.source}
+            </a>
+          </div>
+
+          <div className="h-px w-full bg-border/70" />
+
+          {/* Related Information */}
+          <section className="grid gap-6 md:grid-cols-2">
+            <div className="space-y-2">
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                Key Entities
+              </h2>
+              <div className="flex flex-wrap gap-2">
+                {article.key_entities && article.key_entities.length > 0 ? (
+                  article.key_entities.map((entity) => (
+                    <Badge key={entity} variant="outline" className="border-border/80">
+                      {entity}
+                    </Badge>
+                  ))
+                ) : (
+                  <p className="text-sm text-muted-foreground">No entities available.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                Topics
+              </h2>
+              <div className="flex flex-wrap gap-2">
+                {article.topics && article.topics.length > 0 ? (
+                  article.topics.map((topic) => (
+                    <Badge
+                      key={topic}
+                      variant="outline"
+                      className="border-primary/40 bg-primary/5 text-primary"
+                    >
+                      {topic}
+                    </Badge>
+                  ))
+                ) : (
+                  <p className="text-sm text-muted-foreground">No topics available.</p>
+                )}
+              </div>
+            </div>
+          </section>
+
+          {marketImpact !== undefined && (
+            <section className="space-y-2">
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                Market Impact Score
+              </h2>
+              <div className="h-2.5 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  className={`h-full ${getMarketImpactClassName(marketImpactPercent)}`}
+                  style={{ width: `${marketImpactPercent}%` }}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {marketImpact < 0.3 ? 'Low impact' : marketImpact < 0.7 ? 'Moderate impact' : 'High impact'} -
+                {' '}
+                {marketImpactPercent.toFixed(0)}%
+              </p>
+            </section>
+          )}
+        </CardContent>
+      </Card>
     </Layout>
   );
 }

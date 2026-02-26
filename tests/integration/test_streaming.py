@@ -10,6 +10,15 @@ import sys
 from datetime import datetime
 import logging
 
+# Skip during pytest collection/runs; this module is a manual integration script.
+if "pytest" in sys.modules:
+    import pytest
+
+    pytest.skip(
+        "Integration streaming script is intended to run manually, not in pytest",
+        allow_module_level=True,
+    )
+
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

@@ -1,15 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  Typography, 
-  Grid, 
-  Paper, 
-  Box, 
-  CircularProgress,
-  Card,
-  CardContent,
-  CardHeader
-} from '@mui/material';
+import { useEffect, useState } from 'react';
+import { RefreshCw } from 'lucide-react';
 import Layout from '../../components/Layout';
+import { Badge } from '../../components/ui/badge';
+import { Button } from '../../components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 
 type AnalyticsData = {
   sentiment_distribution: { [key: string]: number };
@@ -23,33 +17,167 @@ type AnalyticsData = {
   };
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const isNumberRecord = (value: unknown): value is Record<string, number> =>
+  isRecord(value) &&
+  Object.values(value).every(
+    (entry) => typeof entry === 'number' && Number.isFinite(entry)
+  );
+
+const isNamedCountArray = (
+  value: unknown
+): value is Array<{ name: string; count: number }> =>
+  Array.isArray(value) &&
+  value.every(
+    (entry) =>
+      isRecord(entry) &&
+      typeof entry.name === 'string' &&
+      typeof entry.count === 'number' &&
+      Number.isFinite(entry.count)
+  );
+
+const isAnalyticsData = (value: unknown): value is AnalyticsData => {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const stats = value.processing_stats;
+  return (
+    isNumberRecord(value.sentiment_distribution) &&
+    isNumberRecord(value.source_distribution) &&
+    isNamedCountArray(value.top_entities) &&
+    isNamedCountArray(value.top_topics) &&
+    isRecord(stats) &&
+    typeof stats.avg_processing_time === 'number' &&
+    Number.isFinite(stats.avg_processing_time) &&
+    typeof stats.articles_processed === 'number' &&
+    Number.isFinite(stats.articles_processed) &&
+    typeof stats.last_update === 'number' &&
+    Number.isFinite(stats.last_update)
+  );
+};
+
+const getResponseErrorMessage = async (
+  response: Response,
+  fallback: string
+): Promise<string> => {
+  const statusText = `${response.status}${response.statusText ? ` ${response.statusText}` : ''}`;
+
+  try {
+    const payload = (await response.clone().json()) as {
+      detail?: unknown;
+      error?: unknown;
+      message?: unknown;
+    };
+    const detail =
+      typeof payload.detail === 'string'
+        ? payload.detail
+        : typeof payload.error === 'string'
+          ? payload.error
+          : typeof payload.message === 'string'
+            ? payload.message
+            : '';
+    const normalizedDetail = detail.trim().toLowerCase();
+    if (normalizedDetail && normalizedDetail !== 'fetch failed') {
+      return `${detail} (${statusText})`;
+    }
+  } catch {
+    // Ignore parse failures and use fallback.
+  }
+
+  return `${fallback} (${statusText})`;
+};
+
+const getSentimentTone = (
+  value: string
+): { circleClassName: string; badgeClassName: string } => {
+  const normalized = value.toLowerCase();
+  if (normalized === 'positive') {
+    return {
+      circleClassName:
+        'bg-emerald-500/15 text-emerald-700 ring-1 ring-emerald-500/40 dark:text-emerald-300',
+      badgeClassName: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+    };
+  }
+  if (normalized === 'negative') {
+    return {
+      circleClassName: 'bg-rose-500/15 text-rose-700 ring-1 ring-rose-500/40 dark:text-rose-300',
+      badgeClassName: 'border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300',
+    };
+  }
+  if (normalized === 'neutral') {
+    return {
+      circleClassName:
+        'bg-amber-500/15 text-amber-700 ring-1 ring-amber-500/40 dark:text-amber-300',
+      badgeClassName: 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300',
+    };
+  }
+  return {
+    circleClassName: 'bg-muted text-foreground ring-1 ring-border',
+    badgeClassName: 'border-border/80 bg-muted/80 text-muted-foreground',
+  };
+};
+
 export default function AnalyticsPage() {
   const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [retrying, setRetrying] = useState(false);
+  const [analyticsError, setAnalyticsError] = useState<string | null>(null);
+  const [retryTick, setRetryTick] = useState(0);
 
   useEffect(() => {
     const fetchAnalytics = async () => {
+      setLoading(true);
+      setAnalyticsError(null);
       try {
         const response = await fetch('/api/analytics');
-        if (!response.ok) throw new Error('Failed to fetch analytics data');
-        const data = await response.json();
+        if (!response.ok) {
+          setAnalyticsData(null);
+          setAnalyticsError(
+            await getResponseErrorMessage(response, 'Failed to fetch analytics data')
+          );
+          return;
+        }
+        const data: unknown = await response.json();
+        if (!isAnalyticsData(data)) {
+          setAnalyticsData(null);
+          setAnalyticsError('Unexpected analytics response format.');
+          return;
+        }
         setAnalyticsData(data);
       } catch (error) {
-        console.error('Error fetching analytics data:', error);
+        setAnalyticsData(null);
+        setAnalyticsError('Network error while loading analytics data.');
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('Failed to fetch analytics data', error);
+        }
       } finally {
         setLoading(false);
+        setRetrying(false);
       }
     };
 
-    fetchAnalytics();
-  }, []);
+    void fetchAnalytics();
+  }, [retryTick]);
+
+  const handleRetry = () => {
+    setRetrying(true);
+    setRetryTick((previous) => previous + 1);
+  };
 
   if (loading) {
     return (
       <Layout title="Analytics Dashboard" description="Financial news analytics and insights">
-        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
-          <CircularProgress />
-        </Box>
+        <div
+          className="flex min-h-[50vh] items-center justify-center"
+          role="status"
+          aria-live="polite"
+          aria-label="Loading analytics"
+        >
+          <div className="h-10 w-10 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
+        </div>
       </Layout>
     );
   }
@@ -57,21 +185,41 @@ export default function AnalyticsPage() {
   if (!analyticsData) {
     return (
       <Layout title="Analytics Dashboard" description="Financial news analytics and insights">
-        <Typography variant="h5" color="error" align="center">
-          Failed to load analytics data. Please try again later.
-        </Typography>
+        <section className="mx-auto max-w-2xl py-10">
+          <Card className="border-destructive/50 bg-destructive/5" role="alert" aria-live="assertive">
+            <CardContent className="space-y-4 p-6 text-center">
+              <p className="text-base font-medium text-destructive">
+                {analyticsError || 'Failed to load analytics data. Please try again later.'}
+              </p>
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                className="gap-1.5"
+                disabled={retrying}
+                onClick={handleRetry}
+              >
+                <RefreshCw className={`h-4 w-4 ${retrying ? 'animate-spin' : ''}`} />
+                {retrying ? 'Retrying...' : 'Retry'}
+              </Button>
+            </CardContent>
+          </Card>
+        </section>
       </Layout>
     );
   }
 
   // Helper function to create simple bar charts
-  const renderBarChart = (data: { [key: string]: number } | { name: string; count: number }[], maxBars = 5) => {
+  const renderBarChart = (
+    data: { [key: string]: number } | Array<{ name: string; count: number }>,
+    maxBars = 5
+  ): React.JSX.Element => {
     let chartData: { label: string; value: number }[] = [];
 
     if (Array.isArray(data)) {
-      chartData = data.slice(0, maxBars).map(item => ({
+      chartData = data.slice(0, maxBars).map((item) => ({
         label: item.name,
-        value: item.count
+        value: item.count,
       }));
     } else {
       chartData = Object.entries(data)
@@ -80,153 +228,142 @@ export default function AnalyticsPage() {
         .slice(0, maxBars);
     }
 
-    const maxValue = Math.max(...chartData.map(item => item.value));
+    if (chartData.length === 0) {
+      return (
+        <p className="text-sm text-muted-foreground">
+          No data available yet.
+        </p>
+      );
+    }
+
+    const maxValue = Math.max(...chartData.map((item) => item.value));
 
     return (
-      <Box sx={{ mt: 2 }}>
-        {chartData.map((item, index) => (
-          <Box key={index} sx={{ mb: 1 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-              <Typography variant="body2">{item.label}</Typography>
-              <Typography variant="body2" fontWeight="bold">{item.value}</Typography>
-            </Box>
-            <Box sx={{ width: '100%', bgcolor: 'grey.100', borderRadius: 1, height: 10 }}>
-              <Box
-                sx={{
-                  width: `${(item.value / maxValue) * 100}%`,
-                  bgcolor: 'primary.main',
-                  height: '100%',
-                  borderRadius: 1,
+      <div className="mt-4 space-y-3">
+        {chartData.map((item) => (
+          <div key={item.label}>
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <p className="truncate text-sm">{item.label}</p>
+              <p className="text-sm font-semibold">{item.value}</p>
+            </div>
+            <div className="h-2.5 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full rounded-full bg-primary"
+                style={{
+                  width: `${maxValue > 0 ? (item.value / maxValue) * 100 : 0}%`,
                 }}
               />
-            </Box>
-          </Box>
+            </div>
+          </div>
         ))}
-      </Box>
+      </div>
     );
   };
 
-  // Prepare sentiment colors
-  const sentimentColors = {
-    positive: '#4caf50',
-    neutral: '#ff9800',
-    negative: '#f44336'
-  };
-
-  // Create sentiment chart data
-  const sentimentData = Object.entries(analyticsData.sentiment_distribution).map(([key, value]) => ({
-    label: key,
-    value,
-    color: sentimentColors[key as keyof typeof sentimentColors] || '#2196f3'
-  }));
+  const sentimentData = Object.entries(analyticsData.sentiment_distribution).map(
+    ([key, value]) => ({
+      label: key,
+      value,
+      tone: getSentimentTone(key),
+    })
+  );
 
   // Calculate sentiment totals for percentage
   const totalSentiment = sentimentData.reduce((sum, item) => sum + item.value, 0);
+  const totalSentimentForPercent = totalSentiment > 0 ? totalSentiment : 1;
 
   return (
     <Layout title="Analytics Dashboard" description="Financial news analytics and insights">
-      <Typography variant="h4" component="h1" gutterBottom>
-        Analytics Dashboard
-      </Typography>
+      <section className="space-y-2">
+        <h1 className="font-display text-3xl font-semibold tracking-tight sm:text-4xl">
+          Analytics Dashboard
+        </h1>
+        <p className="text-sm text-muted-foreground sm:text-base">
+          Last updated:{' '}
+          {new Date(analyticsData.processing_stats.last_update).toLocaleString()}
+        </p>
+      </section>
 
-      <Typography variant="subtitle1" color="text.secondary" gutterBottom>
-        Last updated: {new Date(analyticsData.processing_stats.last_update).toLocaleString()}
-      </Typography>
-
-      <Grid container spacing={3} sx={{ mt: 1 }}>
+      <section className="mt-6 grid gap-4 lg:grid-cols-12">
         {/* Summary Cards */}
-        <Grid item xs={12} md={4}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>Articles Processed</Typography>
-              <Typography variant="h3">{analyticsData.processing_stats.articles_processed}</Typography>
-              <Typography variant="body2" color="text.secondary">
-                Avg. processing time: {analyticsData.processing_stats.avg_processing_time.toFixed(2)}s
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
+        <Card className="lg:col-span-4">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg">Articles Processed</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-4xl font-semibold">
+              {analyticsData.processing_stats.articles_processed}
+            </p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Avg. processing time:{' '}
+              {analyticsData.processing_stats.avg_processing_time.toFixed(2)}s
+            </p>
+          </CardContent>
+        </Card>
 
         {/* Sentiment Distribution */}
-        <Grid item xs={12} md={8}>
-          <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom>Sentiment Distribution</Typography>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 3 }}>
-              {sentimentData.map((item, index) => (
-                <Box key={index} sx={{ textAlign: 'center', width: '33%' }}>
-                  <Box
-                    sx={{
-                      width: 80,
-                      height: 80,
-                      borderRadius: '50%',
-                      bgcolor: item.color,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      mx: 'auto',
-                      color: 'white',
-                      mb: 1
-                    }}
+        <Card className="lg:col-span-8">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg">Sentiment Distribution</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              {sentimentData.map((item) => (
+                <div
+                  key={item.label}
+                  className="rounded-lg border border-border/70 bg-background/70 p-4 text-center"
+                >
+                  <div
+                    className={`mx-auto mb-2 flex h-16 w-16 items-center justify-center rounded-full text-lg font-semibold tabular-nums ${item.tone.circleClassName}`}
                   >
-                    <Typography variant="h5">{item.value}</Typography>
-                  </Box>
-                  <Typography variant="body1" sx={{ textTransform: 'capitalize' }}>
-                    {item.label}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    {((item.value / totalSentiment) * 100).toFixed(1)}%
-                  </Typography>
-                </Box>
+                    {item.value}
+                  </div>
+                  <p className="text-sm font-medium capitalize">{item.label}</p>
+                  <Badge variant="outline" className={`mt-2 text-xs ${item.tone.badgeClassName}`}>
+                    {((item.value / totalSentimentForPercent) * 100).toFixed(1)}%
+                  </Badge>
+                </div>
               ))}
-            </Box>
-          </Paper>
-        </Grid>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Source Distribution */}
-        <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 3, height: '100%' }}>
-            <Typography variant="h6" gutterBottom>Top News Sources</Typography>
-            {renderBarChart(analyticsData.source_distribution)}
-          </Paper>
-        </Grid>
+        <Card className="lg:col-span-6">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg">Top News Sources</CardTitle>
+          </CardHeader>
+          <CardContent>{renderBarChart(analyticsData.source_distribution)}</CardContent>
+        </Card>
 
         {/* Top Entities */}
-        <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 3, height: '100%' }}>
-            <Typography variant="h6" gutterBottom>Top Entities Mentioned</Typography>
-            {renderBarChart(analyticsData.top_entities)}
-          </Paper>
-        </Grid>
+        <Card className="lg:col-span-6">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg">Top Entities Mentioned</CardTitle>
+          </CardHeader>
+          <CardContent>{renderBarChart(analyticsData.top_entities)}</CardContent>
+        </Card>
 
         {/* Top Topics */}
-        <Grid item xs={12}>
-          <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom>Top Topics</Typography>
-            <Grid container spacing={2}>
+        <Card className="lg:col-span-12">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg">Top Topics</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
               {analyticsData.top_topics.map((topic, index) => (
-                <Grid item xs={6} sm={4} md={2.4} key={index}>
-                  <Box
-                    sx={{
-                      bgcolor: 'primary.light',
-                      color: 'white',
-                      p: 2,
-                      borderRadius: 2,
-                      textAlign: 'center',
-                      height: '100%',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      justifyContent: 'center'
-                    }}
-                  >
-                    <Typography variant="h6">{topic.count}</Typography>
-                    <Typography variant="body2">{topic.name}</Typography>
-                  </Box>
-                </Grid>
+                <article
+                  key={`${topic.name}-${index}`}
+                  className="flex h-full flex-col items-center justify-center rounded-lg border border-primary/30 bg-primary/10 p-3 text-center"
+                >
+                  <p className="text-2xl font-semibold tabular-nums text-primary">{topic.count}</p>
+                  <p className="mt-1 text-sm text-primary/90">{topic.name}</p>
+                </article>
               ))}
-            </Grid>
-          </Paper>
-        </Grid>
-      </Grid>
+            </div>
+          </CardContent>
+        </Card>
+      </section>
     </Layout>
   );
 }

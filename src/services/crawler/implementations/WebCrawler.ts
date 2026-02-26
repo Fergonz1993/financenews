@@ -118,7 +118,7 @@ export class WebCrawler extends BaseCrawler {
                 publishedDate = new Date();
               }
             }
-          } catch (error) {
+          } catch {
             // Use current date if parsing fails
             publishedDate = new Date();
           }

@@ -131,7 +131,7 @@ export class CrawlerManager {
       case 'api':
         return new APICrawler(source);
       default:
-        throw new Error(`Unknown source type: ${(source as any).type}`);
+        throw new Error(`Unknown source type: ${source.type}`);
     }
   }
   

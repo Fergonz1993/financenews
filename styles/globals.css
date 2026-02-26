@@ -1,26 +1,107 @@
-html,
-body {
-  padding: 0;
-  margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Oxygen,
-    Ubuntu, Cantarell, Fira Sans, Droid Sans, Helvetica Neue, sans-serif;
-}
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-a {
-  color: inherit;
-  text-decoration: none;
-}
-
-* {
-  box-sizing: border-box;
-}
-
-@media (prefers-color-scheme: dark) {
-  html {
-    color-scheme: dark;
+@layer base {
+  :root {
+    --background: 204 67% 98%;
+    --foreground: 221 39% 14%;
+    --card: 0 0% 100%;
+    --card-foreground: 221 39% 14%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 221 39% 14%;
+    --primary: 199 95% 36%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 36 93% 59%;
+    --secondary-foreground: 24 37% 12%;
+    --muted: 213 36% 93%;
+    --muted-foreground: 217 15% 42%;
+    --accent: 162 63% 45%;
+    --accent-foreground: 221 46% 11%;
+    --destructive: 3 84% 57%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 215 30% 85%;
+    --input: 215 30% 88%;
+    --ring: 199 95% 36%;
+    --radius: 0.9rem;
   }
+
+  .dark {
+    --background: 223 34% 9%;
+    --foreground: 210 40% 96%;
+    --card: 222 32% 12%;
+    --card-foreground: 210 40% 96%;
+    --popover: 222 32% 12%;
+    --popover-foreground: 210 40% 96%;
+    --primary: 199 94% 61%;
+    --primary-foreground: 223 47% 10%;
+    --secondary: 36 94% 58%;
+    --secondary-foreground: 24 36% 12%;
+    --muted: 221 26% 18%;
+    --muted-foreground: 217 15% 72%;
+    --accent: 162 66% 46%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 1 72% 56%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 220 23% 23%;
+    --input: 220 23% 23%;
+    --ring: 199 94% 61%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html,
   body {
-    color: white;
-    background: #121212;
+    @apply m-0 p-0;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    min-height: 100vh;
+    font-family: var(--font-body, 'Public Sans'), 'Segoe UI', sans-serif;
+    line-height: 1.58;
+    letter-spacing: -0.003em;
+    text-rendering: optimizeLegibility;
+    background-image:
+      radial-gradient(circle at 14% -12%, hsl(199 95% 36% / 0.16), transparent 40%),
+      radial-gradient(circle at 88% 0%, hsl(36 93% 59% / 0.16), transparent 38%),
+      linear-gradient(180deg, hsl(var(--background)), hsl(var(--background)));
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display, 'Newsreader'), 'Iowan Old Style', serif;
+    letter-spacing: -0.022em;
+    line-height: 1.14;
+    font-weight: 600;
+  }
+
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-body, 'Public Sans'), 'Segoe UI', sans-serif;
+    letter-spacing: -0.012em;
+    line-height: 1.2;
+    font-weight: 600;
+  }
+
+  a {
+    @apply text-foreground no-underline;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .bg-grid-subtle {
+    background-image:
+      linear-gradient(to right, hsl(var(--border) / 0.28) 1px, transparent 1px),
+      linear-gradient(to bottom, hsl(var(--border) / 0.28) 1px, transparent 1px);
+    background-size: 36px 36px;
   }
 }

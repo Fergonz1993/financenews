@@ -4,6 +4,15 @@ import Parser from 'rss-parser';
 import { generateArticleHash, extractTextFromHtml, logCrawlerActivity } from '../utils/crawler-utils';
 import { format } from 'date-fns';
 
+type RssContentField = {
+  'content:encoded'?: string;
+  'media:content'?: {
+    $?: {
+      url?: string;
+    };
+  };
+};
+
 /**
  * Specialized crawler for RSS feed sources
  */
@@ -41,8 +50,8 @@ export class RSSCrawler extends BaseCrawler {
         }
         
         // Get content from the best available field
-        // @ts-ignore: custom fields might not be properly typed
-        const content = item['content:encoded'] || item.content || item.description || '';
+        const feedItem = item as Parser.Item & RssContentField;
+        const content = feedItem['content:encoded'] || feedItem.content || item.description || '';
         const textContent = extractTextFromHtml(content);
         
         const publishedDate = item.pubDate ? new Date(item.pubDate) : new Date();
@@ -55,8 +64,7 @@ export class RSSCrawler extends BaseCrawler {
           published_at: format(publishedDate, "yyyy-MM-dd'T'HH:mm:ss'Z'"),
           content: textContent,
           author: item.creator || item.author || undefined,
-          // @ts-ignore: get image from media:content if available
-          image_url: item['media:content']?.$.url || undefined,
+          image_url: feedItem['media:content']?.$?.url || undefined,
           crawled_at: format(new Date(), "yyyy-MM-dd'T'HH:mm:ss'Z'"),
           hash: generateArticleHash(item.title || '', textContent)
         };
