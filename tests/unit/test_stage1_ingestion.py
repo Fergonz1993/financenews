@@ -99,6 +99,32 @@ def test_dedupe_keys_stable_for_duplicate_payloads() -> None:
     assert normalized_a["dedupe_key"] == normalized_b["dedupe_key"]
 
 
+def test_dedupe_keys_block_cross_source_duplicates() -> None:
+    """Stable dedupe for identical titles published by different sources on the same day."""
+    original = {
+        "title": "Fed rate cut brings confidence",
+        "published_at": "2025-02-20T10:00:00Z",
+        "source": "CNBC",
+        "url": "https://cnbc.com/news/123",
+        "content": "Original wire content.",
+    }
+    syndicated = {
+        "title": "fed rate CUT brings confidence  ",
+        "published_at": "2025-02-20T23:59:59Z",  # later same day
+        "source": "Yahoo Finance",
+        "url": "https://finance.yahoo.com/news/123", # completely different url
+        "content": "Syndicated piece.",
+    }
+
+    normalized_orig = news_ingest.ArticleRepository._normalize_for_db(original)
+    normalized_synd = news_ingest.ArticleRepository._normalize_for_db(syndicated)
+
+    assert normalized_orig is not None
+    assert normalized_synd is not None
+    assert normalized_orig["url_hash"] != normalized_synd["url_hash"]
+    assert normalized_orig["dedupe_key"] == normalized_synd["dedupe_key"]
+
+
 def test_dedupe_keys_stable_for_title_spacing_and_case_with_missing_url() -> None:
     """Title normalization should remove casing and spacing noise when URL is missing."""
     first = {

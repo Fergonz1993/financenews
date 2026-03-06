@@ -667,9 +667,10 @@ class ArticleRepository:
             if canonical_url
             else f"{source_key}|{title}|{published_at.isoformat()}"
         )
-        dedupe_key = _hash_value(
-            f"{source_key}|{title.lower()}|{published_at.isoformat()}"
-        )
+        # dedupe_key: drop source_key and use YYYY-MM-DD to deduplicate identical titles across sources
+        # on the same day, significantly improving ranking/dedup quality.
+        day_str = published_at.strftime("%Y-%m-%d") if published_at else "1970-01-01"
+        dedupe_key = _hash_value(f"{title.lower()}|{day_str}")
         article_id = item.get("id")
         if not article_id:
             article_id = _hash_value(
