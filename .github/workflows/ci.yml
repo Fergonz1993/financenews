@@ -118,6 +118,14 @@ jobs:
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
 
+      - name: TypeScript type check
+        continue-on-error: true  # 1157 pre-existing TS errors — fix incrementally
+        run: bun run typecheck
+
+      - name: ESLint
+        continue-on-error: true  # 1 pre-existing error — fix incrementally
+        run: bun run lint
+
       - name: Run frontend smoke suite
         env:
           FRONTEND_HOST: 127.0.0.1
