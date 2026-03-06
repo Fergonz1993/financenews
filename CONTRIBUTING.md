@@ -7,7 +7,7 @@ Thanks for your interest in contributing! This guide will help you get set up.
 ### Prerequisites
 
 - **Python 3.12+** with `uv` or `pip`
-- **Node.js 20+** with `npm` or `bun`
+- **Node.js 20+** with `bun`
 - **PostgreSQL 16+** (or use Docker)
 
 ### Quick Start
@@ -27,7 +27,7 @@ pip install -e ".[dev]"
 createdb financenews           # or use docker-compose up postgres
 
 # Frontend
-npm install
+bun install
 
 # Run everything
 python run_server.py           # starts FastAPI + Next.js
@@ -43,10 +43,25 @@ docker compose up --build
 
 ```bash
 # Python unit tests
-PYTHONPATH=src pytest tests/unit -v
+PYTHONPATH=src .venv/bin/pytest tests/unit -v
+
+# Deterministic integration tests
+PYTHONPATH=src .venv/bin/pytest tests/integration -v -m integration
 
 # TypeScript type check
-npx tsc --noEmit
+bun run typecheck
+
+# Quality checkpoint + ratchet (no regression)
+.venv/bin/python scripts/quality_checkpoint.py collect --output-json output/quality/current.json --output-md output/quality/current.md
+.venv/bin/python scripts/quality_checkpoint.py ratchet --baseline config/quality-baseline.json --current output/quality/current.json
+
+# Frontend smoke and screenshot regression
+bun run smoke
+
+# Staging gate + operational drills
+make staging-gate
+make db-backup
+make db-restore-drill
 ```
 
 ## Project Structure
@@ -71,11 +86,12 @@ components/                  # React components
 - **Python**: [Black](https://github.com/psf/black) + [Ruff](https://github.com/astral-sh/ruff)
 - **TypeScript**: [ESLint](https://eslint.org/) with the project config
 
-Run formatters before committing:
+Run formatters and quality gates before committing:
 
 ```bash
-black src/ tests/
-ruff check src/ tests/ --fix
+.venv/bin/ruff check src/ tests/ --fix
+.venv/bin/ruff format src/ tests/
+make quality-ratchet
 ```
 
 ## Pull Request Process

@@ -126,7 +126,7 @@ export default function IngestDashboard(): React.JSX.Element {
       const stored = data.result?.articles_stored ?? 0;
       setTriggerResult(`Cycle completed — ${stored} new article${stored !== 1 ? 's' : ''} stored`);
       await fetchStatus();
-    } catch (err) {
+    } catch {
       setTriggerResult('Ingest cycle failed. Check server logs.');
     } finally {
       setTriggering(false);

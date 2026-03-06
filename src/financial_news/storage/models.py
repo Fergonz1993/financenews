@@ -219,3 +219,45 @@ class UserSavedArticle(Base):
     saved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     __table_args__ = (Index("ix_user_saved_articles_article", "article_id"),)
+
+
+class UserSettings(Base):
+    """Persisted user preference settings."""
+
+    __tablename__ = "user_settings"
+
+    user_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    settings_json: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        default=_default_dict,
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+    __table_args__ = (Index("ix_user_settings_updated_at", "updated_at"),)
+
+
+class UserAlertPreferences(Base):
+    """Persisted per-user alert preferences and rules."""
+
+    __tablename__ = "user_alert_preferences"
+
+    user_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    alerts_json: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        default=_default_dict,
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+    __table_args__ = (Index("ix_user_alert_preferences_updated_at", "updated_at"),)

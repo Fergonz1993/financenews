@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
 import {
   AlertCircle,
@@ -11,7 +11,7 @@ import {
   TriangleAlert,
   XCircle,
 } from 'lucide-react';
-import { io, type Socket as SocketClient } from 'socket.io-client';
+import { FASTAPI_BASE_URL } from '@/pages/api/_utils/fastapiProxy';
 import { cn } from '@/lib/utils';
 import { useNotification } from '../lib/notification-context';
 import { Badge } from './ui/badge';
@@ -28,7 +28,7 @@ import { Separator } from './ui/separator';
 
 type Notification = {
   id: string;
-  timestamp: Date;
+  timestamp: string;
   read: boolean;
   type: string;
   title: string;
@@ -38,45 +38,17 @@ type Notification = {
   url?: string;
 };
 
-const SOCKET_PATH = '/api/ws';
-const resolveSocketBaseUrl = (value: string): string => {
-  try {
-    const parsed = new URL(value);
-    return parsed.origin;
-  } catch {
-    return value;
-  }
+type WsEnvelope = {
+  type: string;
+  payload?: Record<string, unknown>;
+  ts?: string;
+  request_id?: string;
+  alert?: Record<string, unknown>;
+  news?: Record<string, unknown>;
 };
 
-type MarketAlertPayload = {
-  type: 'market_alert';
-  alert: {
-    title: string;
-    details: string;
-    source?: string;
-    severity: Notification['severity'];
-  };
-};
-
-type NewsUpdatePayload = {
-  type: 'news_update';
-  news: {
-    title: string;
-    summary: string;
-    source?: string;
-    url?: string;
-  };
-};
-
-type ConnectionEstablishedPayload = { type: 'connection_established' };
-type UnknownPayload = {
-  type: Exclude<string, 'market_alert' | 'news_update' | 'connection_established'>;
-};
-type NotificationPayload =
-  | MarketAlertPayload
-  | NewsUpdatePayload
-  | ConnectionEstablishedPayload
-  | UnknownPayload;
+const WEBSOCKET_PATH = '/ws';
+const MAX_RECONNECT_DELAY_MS = 15_000;
 
 const createNotificationId = (): string => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -85,185 +57,259 @@ const createNotificationId = (): string => {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 };
 
-const parsePayload = (raw: unknown): NotificationPayload | null => {
-  if (!raw) {
-    return null;
+const clampDateString = (value: string | undefined): string => {
+  if (!value) {
+    return new Date().toISOString();
   }
 
-  if (typeof raw === 'string') {
-    try {
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === 'object' && 'type' in parsed
-        ? (parsed as NotificationPayload)
-        : null;
-    } catch (error) {
-      console.error('Error parsing notification message:', error);
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+};
+
+const parseEnvelope = (raw: string): WsEnvelope | null => {
+  try {
+    const payload = JSON.parse(raw) as unknown;
+    if (!payload || typeof payload !== 'object' || typeof (payload as { type?: unknown }).type !== 'string') {
       return null;
     }
+    const typed = payload as WsEnvelope;
+    return typed;
+  } catch {
+    return null;
   }
+};
 
-  if (typeof raw === 'object' && 'type' in raw) {
-    return raw as NotificationPayload;
+const normalizeSeverity = (raw: unknown): Notification['severity'] => {
+  if (raw === 'success' || raw === 'error' || raw === 'warning' || raw === 'info') {
+    return raw;
   }
+  return 'info';
+};
 
-  return null;
+const parseString = (value: unknown, fallback = ''): string => {
+  return typeof value === 'string' ? value : fallback;
 };
 
 const NotificationCenter = (): React.JSX.Element => {
   const router = useRouter();
-  const { notifyInfo, notifyError, notifySuccess, notifyWarning } = useNotification();
+  const { notifyInfo, notifyError, notifySuccess } = useNotification();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
+
+  const websocketRef = useRef<WebSocket | null>(null);
+  const reconnectAttemptRef = useRef(0);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
+
   const unreadCount = useMemo(
     () => notifications.reduce((count, notification) => count + (notification.read ? 0 : 1), 0),
     [notifications]
   );
 
-  const handleNewNotification = useCallback(
-    (data: NotificationPayload) => {
-      if (data.type === 'connection_established') {
+  const resolveWsUrl = useCallback((): string | null => {
+    const candidates = [
+      process.env.NEXT_PUBLIC_WS_URL,
+      process.env.NEXT_PUBLIC_API_URL,
+      FASTAPI_BASE_URL,
+      process.env.BACKEND_API_URL,
+      process.env.FASTAPI_URL,
+    ];
+
+    for (const candidate of candidates) {
+      if (!candidate || typeof candidate !== 'string') {
+        continue;
+      }
+
+      try {
+        const parsed = new URL(candidate);
+        const protocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
+        return `${protocol}//${parsed.host}${WEBSOCKET_PATH}`;
+      } catch {
+        continue;
+      }
+    }
+
+    return 'ws://127.0.0.1:8000/ws';
+  }, []);
+
+  const clearReconnectTimer = useCallback(() => {
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+  }, []);
+
+  const closeSocket = useCallback(() => {
+    const socket = websocketRef.current;
+    if (!socket) {
+      return;
+    }
+    websocketRef.current = null;
+    socket.close();
+  }, []);
+
+  const scheduleReconnect = useCallback(() => {
+    if (!mountedRef.current) {
+      return;
+    }
+    setIsReconnecting(true);
+    const backoff = Math.min(1_000 * 2 ** Math.min(reconnectAttemptRef.current, 5), MAX_RECONNECT_DELAY_MS);
+    reconnectAttemptRef.current += 1;
+    clearReconnectTimer();
+    reconnectTimerRef.current = setTimeout(() => {
+      void connect();
+    }, backoff);
+  }, [clearReconnectTimer]);
+
+  const handleIncoming = useCallback(
+    (raw: string) => {
+      const envelope = parseEnvelope(raw);
+      if (!envelope) {
         return;
       }
 
-      if (data.type === 'market_alert') {
-        const { alert } = data as MarketAlertPayload;
-        const newNotification: Notification = {
-          id: `notification-${createNotificationId()}`,
-          timestamp: new Date(),
-          read: false,
-          type: 'market_alert',
-          title: alert.title,
-          message: alert.details,
-          source: alert.source,
-          severity: alert.severity,
-        };
+      if (envelope.type === 'connection_established') {
+        setIsConnected(true);
+        setIsReconnecting(false);
+        return;
+      }
 
-        switch (alert.severity) {
-          case 'success':
-            notifySuccess(alert.title);
-            break;
-          case 'error':
-            notifyError(alert.title);
-            break;
-          case 'warning':
-            notifyWarning(alert.title);
-            break;
-          default:
-            notifyInfo(alert.title);
+      if (envelope.type === 'market_alert') {
+        const payloadObject = (envelope.payload || {}) as Record<string, unknown>;
+        const alert =
+          (envelope.alert as Record<string, unknown> | undefined)
+          || (payloadObject.alert as Record<string, unknown> | undefined)
+          || payloadObject
+          || {};
+        const title = parseString(alert.title, 'Market alert');
+        const message = parseString(alert.details, 'New market alert');
+        const source = parseString(alert.source, 'System');
+        const severity = normalizeSeverity(alert.severity);
+
+        if (severity === 'error') {
+          notifyError(`Market alert: ${title}`);
+        } else if (severity === 'warning') {
+          notifyInfo(`Market alert: ${title}`);
+        } else {
+          notifySuccess(`Market alert: ${title}`);
         }
-
-        setNotifications((prev) => [newNotification, ...prev].slice(0, 50));
+        setNotifications((current) => [
+          {
+            id: `notification-${createNotificationId()}`,
+            timestamp: clampDateString(envelope.ts),
+            read: false,
+            type: 'market_alert',
+            title,
+            message,
+            source,
+            severity,
+          },
+          ...current,
+        ].slice(0, 50));
         return;
       }
 
-      if (data.type === 'news_update') {
-        const { news } = data as NewsUpdatePayload;
-        const newNotification: Notification = {
-          id: `notification-${createNotificationId()}`,
-          timestamp: new Date(),
-          read: false,
-          type: 'news_update',
-          title: news.title,
-          message: news.summary,
-          source: news.source,
-          url: news.url,
-          severity: 'info',
-        };
+      if (envelope.type === 'news_update') {
+        const payloadObject = (envelope.payload || {}) as Record<string, unknown>;
+        const news =
+          (envelope.news as Record<string, unknown> | undefined)
+          || (payloadObject.news as Record<string, unknown> | undefined)
+          || payloadObject
+          || {};
+        const title = parseString(news.title, 'News update');
+        const message = parseString(news.summary, 'New article update');
+        const source = parseString(news.source, 'System');
+        const url = parseString(news.url);
 
-        setNotifications((prev) => [newNotification, ...prev].slice(0, 50));
-        notifyInfo(`New: ${news.title}`);
+        notifyInfo(`News update: ${title}`);
+        setNotifications((current) => [
+          {
+            id: `notification-${createNotificationId()}`,
+            timestamp: clampDateString(envelope.ts),
+            read: false,
+            type: 'news_update',
+            title,
+            message,
+            source,
+            severity: 'info',
+            url,
+          },
+          ...current,
+        ].slice(0, 50));
       }
     },
-    [notifySuccess, notifyError, notifyWarning, notifyInfo]
+    [notifyError, notifyInfo, notifySuccess]
   );
 
-  const handleOpen = useCallback(() => {
-    setIsConnected(true);
-    notifySuccess('Connected to notification service');
-  }, [notifySuccess]);
-
-  const handleMessage = useCallback(
-    (eventData: unknown) => {
-      const data = parsePayload(eventData);
-      if (!data) {
-        return;
-      }
-      handleNewNotification(data);
-    },
-    [handleNewNotification]
-  );
-
-  const handleError = useCallback(
-    (error: unknown) => {
-      console.error('WebSocket error:', error);
-      setIsConnected(false);
-      notifyError('Connection to notification service failed');
-    },
-    [notifyError]
-  );
-
-  const handleDisconnected = useCallback(() => {
-    setIsConnected(false);
-    notifyInfo('Disconnected from notification service');
-  }, [notifyInfo]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
+  const connect = useCallback(() => {
+    if (!mountedRef.current) {
       return;
     }
 
-    let active = true;
-    let socket: SocketClient | null = null;
+    if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
+      return;
+    }
 
-    const connectSocket = async () => {
-      try {
-        // Ensure the Next.js API route initializes Socket.IO on the server.
-        await fetch('/api/ws');
-      } catch (error) {
-        console.error('Failed to initialize websocket endpoint:', error);
+    const websocketUrl = resolveWsUrl();
+    if (!websocketUrl) {
+      setIsConnected(false);
+      notifyError('Notification endpoint not available.');
+      return;
+    }
+
+    const socket = new WebSocket(websocketUrl);
+    websocketRef.current = socket;
+
+    socket.addEventListener('open', () => {
+      reconnectAttemptRef.current = 0;
+      setIsConnected(true);
+      setIsReconnecting(false);
+      notifySuccess('Connected to notification stream');
+    });
+
+    socket.addEventListener('message', (event) => {
+      if (typeof event.data === 'string') {
+        handleIncoming(event.data);
       }
+    });
 
-      if (!active) {
-        return;
+    socket.addEventListener('error', () => {
+      setIsConnected(false);
+      notifyError('Notification stream error.');
+    });
+
+    socket.addEventListener('close', () => {
+      setIsConnected(false);
+      setIsReconnecting(true);
+      if (mountedRef.current) {
+        notifyInfo('Notification stream disconnected; reconnecting...');
+        scheduleReconnect();
       }
+    });
+  }, [handleIncoming, notifyError, notifyInfo, notifySuccess, resolveWsUrl, scheduleReconnect]);
 
-      const baseUrl = process.env.NEXT_PUBLIC_WS_URL
-        ? resolveSocketBaseUrl(process.env.NEXT_PUBLIC_WS_URL)
-        : window.location.origin;
-      socket = io(baseUrl, {
-        path: SOCKET_PATH,
-        autoConnect: false,
-        transports: ['websocket', 'polling'],
-      });
+  const handleOpen = useCallback(() => {
+    setIsOpen(true);
+  }, []);
 
-      socket.on('connect', handleOpen);
-      socket.on('message', handleMessage);
-      socket.on('connect_error', handleError);
-      socket.on('disconnect', handleDisconnected);
-      socket.io.on('error', handleError);
-      socket.connect();
-    };
-
-    void connectSocket();
+  useEffect(() => {
+    mountedRef.current = true;
+    connect();
 
     return () => {
-      active = false;
-      if (!socket) {
-        return;
-      }
-      socket.off('connect', handleOpen);
-      socket.off('message', handleMessage);
-      socket.off('connect_error', handleError);
-      socket.off('disconnect', handleDisconnected);
-      socket.io.off('error', handleError);
-      socket.disconnect();
+      mountedRef.current = false;
+      clearReconnectTimer();
+      closeSocket();
+      setIsConnected(false);
+      setIsReconnecting(false);
     };
-  }, [handleOpen, handleMessage, handleError, handleDisconnected]);
+  }, [clearReconnectTimer, closeSocket, connect]);
 
   const handleNotificationClick = (notification: Notification) => {
-    setNotifications((prev) =>
-      prev.map((entry) => (entry.id === notification.id ? { ...entry, read: true } : entry))
+    setNotifications((current) =>
+      current.map((entry) => (entry.id === notification.id ? { ...entry, read: true } : entry)),
     );
 
     if (notification.url) {
@@ -279,7 +325,7 @@ const NotificationCenter = (): React.JSX.Element => {
   };
 
   const handleMarkAllRead = () => {
-    setNotifications((prev) => prev.map((entry) => ({ ...entry, read: true })));
+    setNotifications((current) => current.map((entry) => ({ ...entry, read: true })));
   };
 
   const renderSeverityIcon = (severity: Notification['severity']): React.JSX.Element => {
@@ -295,7 +341,7 @@ const NotificationCenter = (): React.JSX.Element => {
     }
   };
 
-  const formatRelativeTime = (timestamp: Date): string => {
+  const formatRelativeTime = (timestamp: string): string => {
     const now = new Date();
     const diff = Math.floor((now.getTime() - new Date(timestamp).getTime()) / 1000);
 
@@ -314,6 +360,7 @@ const NotificationCenter = (): React.JSX.Element => {
           size="icon"
           className="relative"
           aria-label={`Notifications (${unreadCount} unread)`}
+          onClick={handleOpen}
         >
           <Bell className="h-5 w-5" />
           {unreadCount > 0 && (
@@ -360,14 +407,17 @@ const NotificationCenter = (): React.JSX.Element => {
 
         <Separator />
 
-        {isConnected && (
+        {(isConnected || isReconnecting) && (
           <div className="px-4 py-2">
-            <Badge
-              variant="outline"
-              className="border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-            >
-              Connected
-            </Badge>
+            {isConnected ? (
+              <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 text-emerald-700">
+                Connected
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-amber-700">
+                Reconnecting
+              </Badge>
+            )}
           </div>
         )}
 

@@ -1,6 +1,33 @@
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+
 const frontendBaseUrl = process.env.SMOKE_FRONTEND_BASE_URL ?? 'http://127.0.0.1:3000';
 const requestTimeoutMs = Number(process.env.SMOKE_TIMEOUT_MS ?? '15000');
 const maxLatencyMs = Number(process.env.SMOKE_MAX_LATENCY_MS ?? '8000');
+const smokeMetricsPath = process.env.SMOKE_METRICS_PATH ?? '';
+
+type SmokeMetric = {
+  label: string;
+  endpoint: string;
+  elapsedMs: number;
+  status: number;
+};
+
+type SmokeSummary = {
+  checkedAt: string;
+  baseUrl: string;
+  mode: 'backend' | 'fallback' | 'unknown';
+  maxLatencyMs: number;
+  checks: SmokeMetric[];
+};
+
+const smokeSummary: SmokeSummary = {
+  checkedAt: new Date().toISOString(),
+  baseUrl: frontendBaseUrl,
+  mode: 'unknown',
+  maxLatencyMs,
+  checks: [],
+};
 
 type TimedResponse = {
   status: number;
@@ -73,6 +100,13 @@ async function checkHealth(): Promise<void> {
     payload.mode === 'backend' || payload.mode === 'fallback',
     'Health mode must be "backend" or "fallback"'
   );
+  smokeSummary.mode = payload.mode as 'backend' | 'fallback';
+  smokeSummary.checks.push({
+    label: '/api/health',
+    endpoint: '/api/health',
+    elapsedMs: result.elapsedMs,
+    status: result.status,
+  });
 
   console.log(`PASS /api/health (${result.elapsedMs}ms) mode=${String(payload.mode)}`);
 }
@@ -96,6 +130,12 @@ async function checkFrontendRoutes(): Promise<void> {
       result.bodyText.includes(route.marker),
       `Route ${route.path} missing marker "${route.marker}"`
     );
+    smokeSummary.checks.push({
+      label: `route ${route.path}`,
+      endpoint: route.path,
+      elapsedMs: result.elapsedMs,
+      status: result.status,
+    });
     console.log(`PASS route ${route.path} (${result.elapsedMs}ms)`);
   }
 }
@@ -112,6 +152,12 @@ async function checkApiContracts(): Promise<void> {
     assertCondition(typeof payload.total === 'number', '/api/articles.total must be number');
     assertCondition(typeof payload.limit === 'number', '/api/articles.limit must be number');
     assertCondition(typeof payload.offset === 'number', '/api/articles.offset must be number');
+    smokeSummary.checks.push({
+      label: '/api/articles',
+      endpoint: '/api/articles',
+      elapsedMs: result.elapsedMs,
+      status: result.status,
+    });
     console.log(`PASS /api/articles (${result.elapsedMs}ms)`);
   }
 
@@ -123,6 +169,12 @@ async function checkApiContracts(): Promise<void> {
     const payload = parseJson('/api/articles/count', result.bodyText);
     assertCondition(isRecord(payload), '/api/articles/count payload must be object');
     assertCondition(typeof payload.total === 'number', '/api/articles/count.total must be number');
+    smokeSummary.checks.push({
+      label: '/api/articles/count',
+      endpoint: '/api/articles/count',
+      elapsedMs: result.elapsedMs,
+      status: result.status,
+    });
     console.log(`PASS /api/articles/count (${result.elapsedMs}ms)`);
   }
 
@@ -130,6 +182,12 @@ async function checkApiContracts(): Promise<void> {
     const result = await requireHttp200(`${frontendBaseUrl}/api/sources`, '/api/sources');
     const payload = parseJson('/api/sources', result.bodyText);
     assertCondition(Array.isArray(payload), '/api/sources payload must be array');
+    smokeSummary.checks.push({
+      label: '/api/sources',
+      endpoint: '/api/sources',
+      elapsedMs: result.elapsedMs,
+      status: result.status,
+    });
     console.log(`PASS /api/sources (${result.elapsedMs}ms)`);
   }
 
@@ -137,6 +195,12 @@ async function checkApiContracts(): Promise<void> {
     const result = await requireHttp200(`${frontendBaseUrl}/api/topics`, '/api/topics');
     const payload = parseJson('/api/topics', result.bodyText);
     assertCondition(Array.isArray(payload), '/api/topics payload must be array');
+    smokeSummary.checks.push({
+      label: '/api/topics',
+      endpoint: '/api/topics',
+      elapsedMs: result.elapsedMs,
+      status: result.status,
+    });
     console.log(`PASS /api/topics (${result.elapsedMs}ms)`);
   }
 
@@ -158,6 +222,12 @@ async function checkApiContracts(): Promise<void> {
       isRecord(payload.processing_stats),
       '/api/analytics.processing_stats must be object'
     );
+    smokeSummary.checks.push({
+      label: '/api/analytics',
+      endpoint: '/api/analytics',
+      elapsedMs: result.elapsedMs,
+      status: result.status,
+    });
     console.log(`PASS /api/analytics (${result.elapsedMs}ms)`);
   }
 
@@ -173,6 +243,12 @@ async function checkApiContracts(): Promise<void> {
     );
     assertCondition(Array.isArray(payload.sourcesInfo), '/api/crawler.sourcesInfo must be array');
     assertCondition(isRecord(payload.scheduler), '/api/crawler.scheduler must be object');
+    smokeSummary.checks.push({
+      label: '/api/crawler',
+      endpoint: '/api/crawler',
+      elapsedMs: result.elapsedMs,
+      status: result.status,
+    });
     console.log(`PASS /api/crawler (${result.elapsedMs}ms)`);
   }
 
@@ -183,8 +259,23 @@ async function checkApiContracts(): Promise<void> {
     );
     const payload = parseJson('/api/crawler/sources', result.bodyText);
     assertCondition(Array.isArray(payload), '/api/crawler/sources payload must be array');
+    smokeSummary.checks.push({
+      label: '/api/crawler/sources',
+      endpoint: '/api/crawler/sources',
+      elapsedMs: result.elapsedMs,
+      status: result.status,
+    });
     console.log(`PASS /api/crawler/sources (${result.elapsedMs}ms)`);
   }
+}
+
+async function writeSmokeMetrics(): Promise<void> {
+  if (!smokeMetricsPath.trim()) {
+    return;
+  }
+  const outputPath = path.resolve(smokeMetricsPath);
+  await mkdir(path.dirname(outputPath), { recursive: true });
+  await writeFile(outputPath, JSON.stringify(smokeSummary, null, 2), 'utf8');
 }
 
 async function main(): Promise<void> {
@@ -193,6 +284,7 @@ async function main(): Promise<void> {
   await checkHealth();
   await checkFrontendRoutes();
   await checkApiContracts();
+  await writeSmokeMetrics();
 
   console.log('All smoke checks passed.');
 }

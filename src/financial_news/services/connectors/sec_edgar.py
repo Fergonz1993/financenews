@@ -21,6 +21,7 @@ from typing import Any
 import aiohttp
 
 from financial_news.core.sentiment import analyze_article_sentiment
+from financial_news.services.connectors.base import BaseConnector
 
 logger = logging.getLogger(__name__)
 
@@ -75,8 +76,11 @@ def _extract_topics(text: str) -> list[str]:
     return topics[:3] or ["SEC Filing"]
 
 
-class SECEdgarConnector:
+class SECEdgarConnector(BaseConnector):
     """Fetch recent SEC press releases and filings via EDGAR full-text search."""
+
+    name = "SEC EDGAR"
+    requires_api_key = False
 
     DEFAULT_QUERIES = [
         "earnings",

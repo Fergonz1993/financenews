@@ -1,243 +1,156 @@
-#!/usr/bin/env python3
+"""Deterministic integration tests for continuous ingestion orchestration.
+
+These tests avoid live network dependencies and validate mixed-connector
+behavior, payload validation, and replay safety using mocked connectors.
 """
-Test script for Real-Time Financial News Streaming
-Quick validation of WebSocket connections and event processing.
-"""
 
-import asyncio
-import os
-import sys
-from datetime import datetime
-import logging
+from __future__ import annotations
 
-# Skip during pytest collection/runs; this module is a manual integration script.
-if "pytest" in sys.modules:
-    import pytest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
-    pytest.skip(
-        "Integration streaming script is intended to run manually, not in pytest",
-        allow_module_level=True,
+import pytest
+
+from financial_news.services.continuous_runner import ContinuousIngestRunner
+
+
+class _GoodConnector:
+    async def fetch_articles(self, source_id: int | None = None):
+        return [
+            {
+                "id": "good-1",
+                "source": "Good Source",
+                "source_id": source_id,
+                "title": "Market rallies after CPI cools",
+                "url": "https://example.com/good-1",
+                "content": "US equities rose as inflation data softened.",
+                "published_at": "2026-02-28T12:00:00+00:00",
+                "summary_bullets": ["Equities rose", "Inflation cooled"],
+                "topics": ["Markets"],
+                "key_entities": ["Federal Reserve"],
+            }
+        ]
+
+
+class _InvalidPayloadConnector:
+    async def fetch_articles(self, source_id: int | None = None):
+        # Missing URL should be rejected by validator.
+        return [
+            {
+                "id": "invalid-1",
+                "source": "Invalid Source",
+                "source_id": source_id,
+                "title": "Payload without URL",
+                "content": "Invalid payload",
+                "published_at": "2026-02-28T12:00:00+00:00",
+            }
+        ]
+
+
+class _FailingConnector:
+    async def fetch_articles(self, source_id: int | None = None):
+        raise RuntimeError("upstream timeout")
+
+
+class _FakeNewsIngestor:
+    def __init__(self, session_factory=None) -> None:
+        self.session_factory = session_factory
+
+    async def run_ingest(self):
+        return SimpleNamespace(items_seen=4, items_stored=1, sources_processed=2)
+
+
+@pytest.fixture
+def runner(monkeypatch: pytest.MonkeyPatch) -> ContinuousIngestRunner:
+    runner = ContinuousIngestRunner(session_factory=AsyncMock())
+
+    runner._CONNECTOR_FACTORIES = {
+        "good": ("Good Connector", _GoodConnector),
+        "invalid": ("Invalid Connector", _InvalidPayloadConnector),
+        "failing": ("Failing Connector", _FailingConnector),
+    }
+
+    runner._configured_connector_enabled = {
+        "good": True,
+        "invalid": True,
+        "failing": True,
+    }
+    runner._connector_events = {name: [] for name in runner._CONNECTOR_FACTORIES}
+    runner._connector_status = {}
+    runner._connector_runtime_overrides = {}
+
+    sources = [
+        SimpleNamespace(id=11, source_key="connector-good"),
+        SimpleNamespace(id=12, source_key="connector-invalid"),
+        SimpleNamespace(id=13, source_key="connector-failing"),
+    ]
+    runner._source_repo = SimpleNamespace(
+        upsert_sources=AsyncMock(return_value=[]),
+        list_sources=AsyncMock(return_value=sources),
     )
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+    runner._article_repo = SimpleNamespace(
+        upsert_deduplicated=AsyncMock(return_value=SimpleNamespace(items_stored=2)),
+    )
 
-# Test if we can import our modules
-try:
-    from realtime_websocket_manager import RealTimeStreamManager, NewsAlertSystem
-    from enhanced_news_summarizer import Config, CacheManager, EnhancedNewsSummarizer
-    print("✅ All imports successful!")
-except ImportError as e:
-    print(f"❌ Import error: {e}")
-    print("Run: pip install -r enhanced_requirements_fixed.txt")
-    sys.exit(1)
+    monkeypatch.setattr(
+        "financial_news.services.continuous_runner.initialize_schema",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        "financial_news.services.news_ingest.NewsIngestor",
+        _FakeNewsIngestor,
+    )
 
-class TestEventHandler:
-    """Test event handler to validate events are being received."""
-    
-    def __init__(self):
-        self.events_received = {
-            'trade': 0,
-            'ticker': 0,
-            'news': 0,
-            'sentiment': 0,
-            'forex': 0
-        }
-        self.start_time = datetime.now()
-    
-    async def handle_trade_event(self, event):
-        """Handle trade events."""
-        self.events_received['trade'] += 1
-        print(f"📈 Trade: {event.symbol} @ ${event.price:.4f} [{event.source}]")
-    
-    async def handle_ticker_event(self, event):
-        """Handle ticker events."""
-        self.events_received['ticker'] += 1
-        if self.events_received['ticker'] % 10 == 0:  # Print every 10th ticker
-            print(f"📊 Ticker: {event.symbol} @ ${event.price:.4f} [{event.source}]")
-    
-    async def handle_news_event(self, event):
-        """Handle news events."""
-        self.events_received['news'] += 1
-        title = event.data.get('title', 'No title')[:50]
-        print(f"📰 News: {title}... [{event.source}]")
-    
-    async def handle_sentiment_event(self, event):
-        """Handle sentiment analysis events."""
-        self.events_received['sentiment'] += 1
-        score = event.sentiment_score or 0
-        sentiment = "📗 POSITIVE" if score > 0.1 else "📕 NEGATIVE" if score < -0.1 else "📔 NEUTRAL"
-        print(f"🧠 Sentiment: {sentiment} ({score:.2f}) for {event.symbol or 'MARKET'}")
-    
-    async def handle_forex_event(self, event):
-        """Handle forex events."""
-        self.events_received['forex'] += 1
-        print(f"💱 Forex: {event.symbol} @ {event.price:.5f} [{event.source}]")
-    
-    def print_stats(self):
-        """Print event statistics."""
-        runtime = datetime.now() - self.start_time
-        total_events = sum(self.events_received.values())
-        
-        print(f"""
-╔══════════════════════════════════════════════════════════════════╗
-║                        📊 EVENT STATISTICS                       ║
-╠══════════════════════════════════════════════════════════════════╣
-║ Runtime: {str(runtime).split('.')[0]}                                       ║
-║ Total Events: {total_events:,}                                            ║
-║                                                                  ║
-║ Event Breakdown:                                                 ║
-║   📈 Trades: {self.events_received['trade']:,}                                    ║
-║   📊 Tickers: {self.events_received['ticker']:,}                                   ║
-║   📰 News: {self.events_received['news']:,}                                      ║
-║   🧠 Sentiment: {self.events_received['sentiment']:,}                               ║
-║   💱 Forex: {self.events_received['forex']:,}                                     ║
-╚══════════════════════════════════════════════════════════════════╝
-""")
+    return runner
 
-async def test_basic_functionality():
-    """Test basic WebSocket functionality."""
-    
-    print("🚀 Starting Financial News Real-Time Stream Test")
-    print("=" * 60)
-    
-    # Create configuration
-    config = Config()
-    
-    # Create test event handler
-    test_handler = TestEventHandler()
-    
-    # Create stream manager
-    stream_manager = RealTimeStreamManager(config)
-    
-    # Create cache and news summarizer
-    cache = CacheManager()
-    stream_manager.news_summarizer = EnhancedNewsSummarizer(config, cache)
-    
-    # Register event handlers
-    stream_manager.add_event_handler('trade', test_handler.handle_trade_event)
-    stream_manager.add_event_handler('ticker', test_handler.handle_ticker_event)
-    stream_manager.add_event_handler('news', test_handler.handle_news_event)
-    stream_manager.add_event_handler('sentiment', test_handler.handle_sentiment_event)
-    stream_manager.add_event_handler('forex', test_handler.handle_forex_event)
-    
-    # Setup alert system
-    alert_system = NewsAlertSystem()
-    stream_manager.add_event_handler('sentiment', alert_system.handle_sentiment_event)
-    
-    # Start event processing
-    asyncio.create_task(stream_manager.process_event_queue())
-    
-    # Start streams
-    print("🌐 Starting WebSocket streams...")
-    stream_manager.start_all_streams()
-    
-    # Print status every 30 seconds
-    async def print_periodic_stats():
-        while True:
-            await asyncio.sleep(30)
-            test_handler.print_stats()
-            
-            # Print stream status
-            print("\n📡 Stream Status:")
-            for stream_name, status in stream_manager.connection_status.items():
-                status_icon = "🟢" if status else "🔴"
-                print(f"   {status_icon} {stream_name}")
-    
-    # Start periodic stats
-    asyncio.create_task(print_periodic_stats())
-    
-    print(f"""
-🎯 Test Configuration:
-   - Demo mode using EODHD demo key
-   - Monitoring: AAPL, MSFT, GOOGL, AMZN, TSLA, NVDA, META
-   - Forex: EURUSD, GBPUSD, USDJPY
-   - Crypto: All Binance tickers
-   - News: Requires NEWSFILTER_API_KEY environment variable
 
-💡 Tips:
-   - Set EODHD_API_KEY for full market access
-   - Set NEWSFILTER_API_KEY for real-time news
-   - Press Ctrl+C to stop
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_continuous_runner_handles_mixed_connector_outcomes(
+    runner: ContinuousIngestRunner,
+):
+    result = await runner.trigger_immediate()
 
-📊 Real-time data will appear below:
-""")
-    
-    try:
-        # Run for test duration or until interrupted
-        await asyncio.sleep(300)  # Run for 5 minutes
-        
-    except KeyboardInterrupt:
-        print("\n🛑 Test interrupted by user")
-    
-    finally:
-        print("\n📊 Final Statistics:")
-        test_handler.print_stats()
-        
-        print("🛑 Stopping all streams...")
-        stream_manager.stop_all_streams()
-        
-        print("✅ Test completed!")
+    assert result["status"] == "partial"
+    assert result["articles_stored"] == 3
 
-async def test_environment():
-    """Test environment setup and API keys."""
-    
-    print("🔍 Testing Environment Setup")
-    print("=" * 40)
-    
-    # Check API keys
-    api_keys = {
-        'OPENAI_API_KEY': os.getenv('OPENAI_API_KEY'),
-        'EODHD_API_KEY': os.getenv('EODHD_API_KEY', 'demo'),
-        'NEWSFILTER_API_KEY': os.getenv('NEWSFILTER_API_KEY'),
-        'NEWS_API_KEY': os.getenv('NEWS_API_KEY'),
-        'FINNHUB_API_KEY': os.getenv('FINNHUB_API_KEY'),
-    }
-    
-    for key, value in api_keys.items():
-        if value:
-            masked_value = value[:8] + "..." if len(value) > 8 else "***"
-            print(f"✅ {key}: {masked_value}")
-        else:
-            print(f"⚠️  {key}: Not set")
-    
-    print("\n📁 Configuration Files:")
-    config_files = ['config.yaml', 'env_template']
-    for file in config_files:
-        if os.path.exists(file):
-            print(f"✅ {file}: Found")
-        else:
-            print(f"⚠️  {file}: Not found")
-    
-    print("\n🐍 Python Dependencies:")
-    required_packages = [
-        'websocket', 'websockets', 'aiohttp', 'rich', 
-        'openai', 'redis', 'pandas', 'numpy'
-    ]
-    
-    for package in required_packages:
-        try:
-            __import__(package.replace('-', '_'))
-            print(f"✅ {package}: Installed")
-        except ImportError:
-            print(f"❌ {package}: Missing")
+    connector_results = result["results"]
+    assert connector_results["good"]["state"] in {"ready", "degraded"}
+    assert connector_results["good"]["articles_validated"] == 1
+    assert connector_results["invalid"]["articles_rejected"] == 1
+    assert connector_results["failing"]["state"] == "error"
+    assert connector_results["failing"]["error_code"] == "timeout"
 
-if __name__ == "__main__":
-    print("""
-╔══════════════════════════════════════════════════════════════════╗
-║          📈 Financial News Real-Time Streaming Test 📈           ║
-║                                                                  ║
-║  This test validates WebSocket connections and event processing  ║
-╚══════════════════════════════════════════════════════════════════╝
-""")
-    
-    import argparse
-    parser = argparse.ArgumentParser(description='Test real-time financial news streaming')
-    parser.add_argument('--env-check', action='store_true', help='Check environment setup only')
-    args = parser.parse_args()
-    
-    if args.env_check:
-        asyncio.run(test_environment())
-    else:
-        asyncio.run(test_basic_functionality()) 
+    status = runner.get_status()
+    assert "connectors" in status
+    assert status["connectors"]["good"]["enabled"] is True
+    assert status["connectors"]["failing"]["state"] == "error"
+    assert status["connectors"]["good"]["slo_24h"]["events"] >= 1
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_continuous_runner_replay_is_idempotent(runner: ContinuousIngestRunner):
+    runner._article_repo.upsert_deduplicated = AsyncMock(
+        side_effect=[
+            SimpleNamespace(items_stored=2),
+            SimpleNamespace(items_stored=0),
+        ]
+    )
+
+    first = await runner.trigger_immediate()
+    second = await runner.trigger_immediate()
+
+    assert first["results"]["good"]["articles_stored"] == 2
+    assert second["results"]["good"]["articles_stored"] == 0
+
+
+@pytest.mark.integration
+def test_connector_runtime_toggle_controls(runner: ContinuousIngestRunner):
+    disabled = runner.set_connector_enabled("good", False)
+    assert disabled["effective_enabled"] is False
+
+    cleared = runner.clear_connector_override("good")
+    assert cleared["runtime_override"] is None
+    assert cleared["effective_enabled"] is True

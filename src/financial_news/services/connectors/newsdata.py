@@ -19,6 +19,7 @@ from typing import Any
 import aiohttp
 
 from financial_news.core.sentiment import analyze_article_sentiment
+from financial_news.services.connectors.base import BaseConnector
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +73,11 @@ def _extract_topics(text: str) -> list[str]:
     return topics[:3] or ["Markets"]
 
 
-class NewsdataConnector:
+class NewsdataConnector(BaseConnector):
     """Fetch financial news from Newsdata.io (free tier, API key required)."""
+
+    name = "Newsdata.io"
+    requires_api_key = True
 
     DEFAULT_QUERIES = ["finance", "stock market", "economy"]
 

@@ -1,0 +1,70 @@
+name: 📡 New Data Source Connector
+description: Propose a new financial data source connector
+labels: ["connector", "enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Adding new data sources is the easiest way to contribute! See [CONTRIBUTING.md](../../CONTRIBUTING.md#adding-new-data-sources) for the guide.
+
+  - type: input
+    id: source_name
+    attributes:
+      label: Data source name
+      placeholder: e.g., Alpha Vantage, Benzinga, Polygon.io
+    validations:
+      required: true
+
+  - type: input
+    id: source_url
+    attributes:
+      label: Data source URL
+      placeholder: https://example.com/api/docs
+    validations:
+      required: true
+
+  - type: dropdown
+    id: source_type
+    attributes:
+      label: Source type
+      options:
+        - RSS / Atom Feed
+        - REST API (free, no key)
+        - REST API (free tier, needs key)
+        - REST API (paid)
+        - WebSocket
+        - Web Scraping
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What kind of data does this source provide? Why is it valuable?
+      placeholder: |
+        This source provides real-time earnings call transcripts...
+    validations:
+      required: true
+
+  - type: textarea
+    id: rate_limits
+    attributes:
+      label: Rate limits & pricing
+      description: Any rate limits, free tier details, or pricing info?
+      placeholder: |
+        Free tier: 5 calls/min, 500/day
+        No API key required
+    validations:
+      required: false
+
+  - type: dropdown
+    id: willing
+    attributes:
+      label: Would you like to implement this connector?
+      options:
+        - "Yes — I'll follow the BaseConnector pattern and submit a PR"
+        - "Maybe — I'd need some help"
+        - "No — just proposing the idea"
+    validations:
+      required: false

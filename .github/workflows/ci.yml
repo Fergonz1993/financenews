@@ -6,9 +6,59 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  quality-ratchet:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.2"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Collect quality checkpoint
+        run: |
+          python scripts/quality_checkpoint.py collect \
+            --output-json output/quality/current.json \
+            --output-md output/quality/current.md
+
+      - name: Enforce quality ratchet
+        run: |
+          python scripts/quality_checkpoint.py ratchet \
+            --baseline config/quality-baseline.json \
+            --current output/quality/current.json
+
+      - name: Upload quality artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-checkpoint
+          if-no-files-found: warn
+          path: output/quality/**
+
   python-tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: quality-ratchet
     services:
       postgres:
         image: postgres:16-alpine
@@ -30,35 +80,66 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
 
       - name: Install Python dependencies
         run: |
-          pip install --upgrade pip
-          pip install -e ".[dev]" 2>/dev/null || pip install -r requirements.txt
-          pip install pytest pytest-asyncio pytest-cov
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
 
       - name: Run unit tests
         env:
           PYTHONPATH: src
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/financenews_test
-        run: |
-          pytest tests/unit -v --tb=short --cov=src/financial_news --cov-report=term-missing
+        run: pytest tests/unit -v --tb=short
 
-  typescript-check:
+      - name: Run integration tests
+        env:
+          PYTHONPATH: src
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/financenews_test
+        run: pytest tests/integration -v --tb=short -m integration
+
+  frontend-smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: quality-ratchet
+
     steps:
       - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.2"
 
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm"
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
 
-      - name: TypeScript type check
-        run: npx tsc --noEmit
+      - name: Run frontend smoke suite
+        env:
+          FRONTEND_HOST: 127.0.0.1
+          FRONTEND_PORT: 3100
+          ENABLE_LOCAL_API_FALLBACK: true
+        run: bun run smoke
 
-      - name: ESLint
-        run: npx eslint . --max-warnings 0 || true
+      - name: Upload smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-smoke-artifacts
+          if-no-files-found: warn
+          path: |
+            .tmp/smoke/**
+            output/playwright/smoke/**
+
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: [python-tests, frontend-smoke]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t financenews:ci .

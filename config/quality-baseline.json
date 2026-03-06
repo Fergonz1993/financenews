@@ -1,0 +1,16 @@
+{
+  "ruff_errors_max": 196,
+  "active_module_ruff_errors_max": 0,
+  "mypy_errors_max": 482,
+  "active_module_mypy_errors_max": 0,
+  "eslint_warnings_max": 0,
+  "coverage_unit_pct_min": 36,
+  "max_smoke_p95_ms": 1200,
+  "max_ingest_freshness_lag_seconds": 172800,
+  "require_smoke_latency": false,
+  "require_ingest_freshness": false,
+  "require_unit_tests_passed": true,
+  "require_tsc_passed": true,
+  "require_eslint_passed": true,
+  "require_smoke_frontend": false
+}

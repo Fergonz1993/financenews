@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
@@ -14,6 +14,62 @@ import pytest
 import financial_news.services.news_ingest as news_ingest
 from financial_news.services.news_ingest import NewsIngestor, SourceResult
 from financial_news.storage.repositories import IngestResult
+
+
+def test_feed_env_parsing_and_dedup(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(
+        "NEWS_INGEST_FEEDS",
+        "https://example.com/feed, https://example.com/feed , https://another.com/rss",
+    )
+    monkeypatch.setenv("SEC_PRESS_RELEASE_FEEDS", "https://www.sec.gov/news/pressreleases.rss")
+
+    feeds = news_ingest._env_or_default_sources()
+    urls = [url for _name, url in feeds]
+
+    assert "https://www.sec.gov/news/pressreleases.rss" in urls
+    assert urls.count("https://example.com/feed") == 1
+    assert "https://another.com/rss" in urls
+
+
+def test_infer_source_metadata_for_regulatory_feed() -> None:
+    metadata = news_ingest._infer_source_metadata(
+        source_name="SEC Press Releases",
+        source_url="https://www.sec.gov/news/pressreleases.rss",
+        source_type="sec",
+    )
+    assert metadata["source_category"] == "regulatory"
+    assert metadata["connector_type"] == "sec"
+    assert metadata["requires_user_agent"] is True
+    assert metadata["legal_basis"] == "public_regulatory_disclosure"
+    assert metadata["rate_profile"] == "sec-conservative"
+
+
+def test_build_source_url_and_hash_helpers() -> None:
+    source_url = "https://api.example.com/feed?topic=markets"
+    rebuilt = news_ingest._build_source_url(
+        source_url,
+        supports_since=True,
+        cursor_value="2026-02-28T12:00:00+00:00",
+    )
+    assert "topic=markets" in rebuilt
+    assert "from=2026-02-28T12%3A00%3A00%2B00%3A00" in rebuilt
+
+    unchanged = news_ingest._build_source_url(
+        source_url,
+        supports_since=False,
+        cursor_value="2026-02-28T12:00:00+00:00",
+    )
+    assert unchanged == source_url
+
+    normalized = news_ingest._normalize_source_url(
+        "https://api.example.com/feed?topic=markets&x=1"
+    )
+    assert normalized == "https://api.example.com/feed"
+
+    item_id, url_hash, dedupe_key = news_ingest._dedupe_hashes(None, "u1", "d1")
+    assert item_id
+    assert url_hash == "u1"
+    assert dedupe_key == "d1"
 
 
 def test_dedupe_keys_stable_for_duplicate_payloads() -> None:
@@ -166,7 +222,7 @@ async def test_fetch_and_parse_source_filters_by_published_cursor(monkeypatch: p
                     "link": "https://example.com/new",
                 },
             ],
-            "W/\"123\"",
+            'W/"123"',
         )
 
     monkeypatch.setattr(news_ingest, "_entry_to_record", fake_entry_to_record)
@@ -185,7 +241,7 @@ async def test_fetch_and_parse_source_filters_by_published_cursor(monkeypatch: p
         parser_contract={},
     )
 
-    assert etag == "W/\"123\""
+    assert etag == 'W/"123"'
     assert len(parsed) == 1
     assert parsed[0]["id"] == "new"
     assert parsed[0]["title"] == "New Item"
@@ -417,7 +473,7 @@ def test_build_default_source_configs_includes_connector_metadata() -> None:
 
 @pytest.mark.asyncio
 async def test_run_source_keeps_cursor_when_no_new_items(monkeypatch: pytest.MonkeyPatch) -> None:
-    cursor = datetime(2025, 2, 20, 12, 0, 0, tzinfo=timezone.utc).isoformat()
+    cursor = datetime(2025, 2, 20, 12, 0, 0, tzinfo=UTC).isoformat()
     state = _State(cursor_type="published_at", cursor_value=cursor, etag="etag-prev")
     ingestor = _build_ingestor_for_unit(
         article_repo=_FakeArticleRepo(
@@ -442,7 +498,7 @@ async def test_run_source_keeps_cursor_when_no_new_items(monkeypatch: pytest.Mon
 async def test_run_source_skips_when_in_backoff_window() -> None:
     state = _State(
         disabled_by_failure=True,
-        next_retry_at=datetime.now(timezone.utc) + timedelta(minutes=30),
+        next_retry_at=datetime.now(UTC) + timedelta(minutes=30),
         cursor_type="published_at",
         cursor_value="2025-02-20T12:00:00+00:00",
     )
@@ -521,9 +577,9 @@ async def test_source_health_returns_state_and_source_identity() -> None:
         cursor_type="published_at",
         cursor_value="2025-02-20T11:00:00+00:00",
         consecutive_failures=2,
-        last_success_at=datetime(2025, 2, 20, 11, 0, 0, tzinfo=timezone.utc),
+        last_success_at=datetime(2025, 2, 20, 11, 0, 0, tzinfo=UTC),
         last_error="temporary_error",
-        next_retry_at=datetime(2025, 2, 20, 11, 5, 0, tzinfo=timezone.utc),
+        next_retry_at=datetime(2025, 2, 20, 11, 5, 0, tzinfo=UTC),
         disabled_by_failure=True,
         last_latency_ms=123,
     )

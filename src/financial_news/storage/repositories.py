@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 import hashlib
-import re
-from typing import Any
 import random
+import re
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import and_, delete, func, or_, select
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import sessionmaker
 
 from financial_news.storage.models import (
     Article,
@@ -21,7 +18,14 @@ from financial_news.storage.models import (
     IngestionState,
     Source,
     UserSavedArticle,
+    UserSettings,
+    UserAlertPreferences,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
 def _slugify(value: Any) -> str:
@@ -53,16 +57,16 @@ def _safe_float(value: Any) -> float | None:
 
 def _coerce_datetime(value: Any) -> datetime:
     if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
     if not value:
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
     if isinstance(value, str):
         try:
             parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
         except ValueError:
-            return datetime.now(timezone.utc)
-    return datetime.now(timezone.utc)
+            return datetime.now(UTC)
+    return datetime.now(UTC)
 
 
 def _canonicalize_url(value: str) -> str:
@@ -129,7 +133,7 @@ def _collect_aliases(search: str) -> list[str]:
     return aliases
 
 
-def _search_match(article: dict[str, Any], normalized_query: str, aliases: list[str]) -> bool:
+def _search_match(article: dict[str, Any], aliases: list[str]) -> bool:
     haystack = " ".join(
         [
             _normalize_search_text(article.get("title")),
@@ -156,7 +160,7 @@ def _topic_matches(article: dict[str, Any], topic_slug: str) -> bool:
     return any(_slugify(item) == topic_slug for item in article.get("topics", []))
 
 
-def _extract_single_column(rows: Iterable[tuple[Any, ...]], idx: int) -> set[str]:
+def _extract_single_column(rows: Iterable[Any], idx: int) -> set[str]:
     return {str(row[idx]) for row in rows if row[idx] is not None}
 
 
@@ -200,7 +204,7 @@ class IngestResult:
 class SourceRepository:
     """Source registry persistence."""
 
-    def __init__(self, session_factory: sessionmaker[AsyncSession]) -> None:
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
 
     async def get_by_id(self, source_id: int) -> Source | None:
@@ -250,7 +254,7 @@ class SourceRepository:
         if not sources:
             return []
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         async with self._session_factory() as session:
             keys = [source.source_key for source in sources]
             rows = await session.execute(select(Source).where(Source.source_key.in_(keys)))
@@ -334,7 +338,7 @@ class SourceRepository:
                 return None
 
             source.enabled = enabled
-            source.updated_at = datetime.now(timezone.utc)
+            source.updated_at = datetime.now(UTC)
             await session.commit()
             return source
 
@@ -367,7 +371,7 @@ class SourceRepository:
 class ArticleRepository:
     """Article persistence and retrieval."""
 
-    def __init__(self, session_factory: sessionmaker[AsyncSession]) -> None:
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
 
     async def get_by_id(self, article_id: str) -> Article | None:
@@ -418,7 +422,7 @@ class ArticleRepository:
                 statement = statement.where(Article.published_at <= published_until)
 
             if sort_by == "relevance":
-                order_by = Article.market_impact_score.desc().nullslast()
+                order_by: Any = Article.market_impact_score.desc().nullslast()
             elif sort_by == "sentiment":
                 order_by = Article.sentiment_score.desc().nullslast()
             else:
@@ -445,7 +449,7 @@ class ArticleRepository:
             payload = [
                 article
                 for article in payload
-                if _search_match(article, normalized, aliases)
+                if _search_match(article, aliases)
             ]
 
         if needs_post_filtering and bounded_offset:
@@ -506,7 +510,7 @@ class ArticleRepository:
             payload = [
                 article
                 for article in payload
-                if _search_match(article, normalized, aliases)
+                if _search_match(article, aliases)
             ]
         return len(payload)
 
@@ -515,7 +519,7 @@ class ArticleRepository:
             result = await session.execute(
                 select(Article.source_name)
                 .distinct()
-                .where(and_(Article.source_name != None, Article.source_name != ""))
+                .where(and_(Article.source_name.is_not(None), Article.source_name != ""))
             )
             return sorted({row[0] for row in result.all() if row[0]})
 
@@ -607,7 +611,7 @@ class ArticleRepository:
 
             if inserted_ids:
                 created = []
-                now = datetime.now(timezone.utc)
+                now = datetime.now(UTC)
                 for item in normalized:
                     if item["id"] not in inserted_ids:
                         continue
@@ -721,7 +725,7 @@ class ArticleRepository:
 class IngestionRunRepository:
     """Run tracking with counters and per-source status."""
 
-    def __init__(self, session_factory: sessionmaker[AsyncSession]) -> None:
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
 
     async def create_run(self, run_id: str, requested_sources: int) -> None:
@@ -731,7 +735,7 @@ class IngestionRunRepository:
                     run_id=run_id,
                     requested_sources=requested_sources,
                     status="running",
-                    started_at=datetime.now(timezone.utc),
+                    started_at=datetime.now(UTC),
                     error_summary=[],
                     source_results=[],
                 )
@@ -766,7 +770,7 @@ class IngestionRunRepository:
             run = await session.get(IngestionRun, run_id)
             if run is None:
                 return
-            run.finished_at = datetime.now(timezone.utc)
+            run.finished_at = datetime.now(UTC)
             run.items_seen = items_seen
             run.items_stored = items_stored
             run.items_skipped = items_skipped
@@ -787,7 +791,7 @@ class IngestionRunRepository:
 class IngestionStateRepository:
     """Source cursor and failure-state tracker."""
 
-    def __init__(self, session_factory: sessionmaker[AsyncSession]) -> None:
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
 
     async def get_all(self) -> list[IngestionState]:
@@ -830,7 +834,7 @@ class IngestionStateRepository:
             state.cursor_value = cursor_value
             state.etag = etag
             state.last_published_at = last_published_at
-            state.last_success_at = datetime.now(timezone.utc)
+            state.last_success_at = datetime.now(UTC)
             state.last_latency_ms = latency_ms
             state.last_failure_at = None
             state.last_error = None
@@ -861,10 +865,10 @@ class IngestionStateRepository:
             if jitter_ms > 0:
                 jitter = min(jitter_ms / 1000, delay_seconds * 0.2)
                 delay_seconds += random.uniform(0.0, jitter)
-            state.next_retry_at = datetime.now(timezone.utc) + timedelta(
+            state.next_retry_at = datetime.now(UTC) + timedelta(
                 seconds=delay_seconds
             )
-            state.last_failure_at = datetime.now(timezone.utc)
+            state.last_failure_at = datetime.now(UTC)
             state.last_error = error
             state.last_latency_ms = latency_ms
             state.cursor_type = cursor_type
@@ -891,7 +895,7 @@ class IngestionStateRepository:
 class UserArticleStateRepository:
     """User-level article bookmark state."""
 
-    def __init__(self, session_factory: sessionmaker[AsyncSession]) -> None:
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
 
     async def save_article(
@@ -909,7 +913,7 @@ class UserArticleStateRepository:
                 )
             else:
                 existing.article_snapshot = snapshot
-                existing.saved_at = datetime.now(timezone.utc)
+                existing.saved_at = datetime.now(UTC)
             await session.commit()
 
     async def unsave_article(self, user_id: str, article_id: str) -> bool:
@@ -923,7 +927,7 @@ class UserArticleStateRepository:
                 )
             )
             await session.commit()
-            return bool(result.rowcount)
+            return bool(getattr(result, "rowcount", 0))
 
     async def is_saved(self, user_id: str, article_id: str) -> bool:
         async with self._session_factory() as session:
@@ -950,3 +954,57 @@ class UserArticleStateRepository:
                 payload["saved_at"] = row.saved_at.isoformat()
                 items.append(payload)
             return items
+
+
+class UserSettingsRepository:
+    """Persisted settings preferences per user."""
+
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+        self._session_factory = session_factory
+
+    async def get(self, user_id: str) -> dict[str, Any] | None:
+        async with self._session_factory() as session:
+            existing = await session.get(UserSettings, user_id)
+            if existing is None:
+                return None
+            payload = existing.settings_json
+            return payload if isinstance(payload, dict) else {}
+
+    async def upsert(self, user_id: str, settings: dict[str, Any]) -> dict[str, Any]:
+        async with self._session_factory() as session:
+            existing = await session.get(UserSettings, user_id)
+            if existing is None:
+                existing = UserSettings(user_id=user_id, settings_json=dict(settings))
+                session.add(existing)
+            else:
+                existing.settings_json = dict(settings)
+                existing.updated_at = datetime.now(UTC)
+            await session.commit()
+            return dict(settings)
+
+
+class UserAlertPreferencesRepository:
+    """Persisted alert preferences per user."""
+
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+        self._session_factory = session_factory
+
+    async def get(self, user_id: str) -> dict[str, Any] | None:
+        async with self._session_factory() as session:
+            existing = await session.get(UserAlertPreferences, user_id)
+            if existing is None:
+                return None
+            payload = existing.alerts_json
+            return payload if isinstance(payload, dict) else {}
+
+    async def upsert(self, user_id: str, alerts: dict[str, Any]) -> dict[str, Any]:
+        async with self._session_factory() as session:
+            existing = await session.get(UserAlertPreferences, user_id)
+            if existing is None:
+                existing = UserAlertPreferences(user_id=user_id, alerts_json=dict(alerts))
+                session.add(existing)
+            else:
+                existing.alerts_json = dict(alerts)
+                existing.updated_at = datetime.now(UTC)
+            await session.commit()
+            return dict(alerts)

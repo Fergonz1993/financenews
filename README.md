@@ -56,7 +56,7 @@ An open-source financial news platform that continuously aggregates articles fro
 ### Prerequisites
 
 - Python 3.12+
-- Node.js 20+
+- Node.js 20+ and Bun 1.3+
 - PostgreSQL 16+ (or Docker)
 
 ### 1. Clone & Configure
@@ -79,7 +79,7 @@ pip install -e ".[dev]"
 ### 3. Frontend Setup
 
 ```bash
-npm install
+bun install
 ```
 
 ### 4. Database
@@ -166,12 +166,45 @@ GET  /api/ingest/continuous/status  # Detailed connector-level status
 ## 🧪 Tests
 
 ```bash
-# Python unit tests (57 tests)
-PYTHONPATH=src pytest tests/unit -v
+# Python unit tests
+PYTHONPATH=src .venv/bin/pytest tests/unit -v
+
+# Deterministic integration tests
+PYTHONPATH=src .venv/bin/pytest tests/integration -v -m integration
 
 # TypeScript type check
-npx tsc --noEmit
+bun run typecheck
+
+# Quality checkpoint + ratchet (no regression)
+.venv/bin/python scripts/quality_checkpoint.py collect --output-json output/quality/current.json --output-md output/quality/current.md
+.venv/bin/python scripts/quality_checkpoint.py ratchet --baseline config/quality-baseline.json --current output/quality/current.json
+
+# Frontend smoke + screenshot regression
+bun run smoke
 ```
+
+## 🚦 Staging and Restore Operations
+
+```bash
+# Run migration/test/quality release gate against staging DB
+make staging-gate
+
+# Create backup and prune old snapshots
+make db-backup
+
+# Run timed backup+restore drill
+make db-restore-drill
+```
+
+Operational prerequisites:
+
+- Reachable PostgreSQL database URLs (`STAGING_DATABASE_URL`, `DATABASE_URL`, `DRILL_DATABASE_URL` as needed).
+- PostgreSQL client tools on `PATH` for backup/restore flows: `pg_dump`, `pg_restore`, `psql`.
+
+Runbooks:
+
+- `docs/operations/staging-release-gate.md`
+- `docs/operations/backup-restore-drill.md`
 
 ## 📁 Project Structure
 
@@ -216,6 +249,18 @@ All config is via environment variables. See [`.env.example`](.env.example) for 
 | `SEC_EDGAR_ENABLED` | `true` | Enable SEC EDGAR connector |
 | `NEWSDATA_ENABLED` | `true` | Enable Newsdata.io (needs API key) |
 | `NEWSDATA_API_KEY` | _(empty)_ | Newsdata.io free tier key |
+| `REDDIT_ENABLED` | `false` | Enable Reddit finance connector |
+| `REDDIT_SUBREDDITS` | `investing,stocks,stockmarket,economics,wallstreetbets` | Curated subreddit rollout list |
+| `REDDIT_PRECISION_THRESHOLD` | `0.35` | Minimum precision score for Reddit post ingestion |
+| `REDDIT_RATE_BUDGET_PER_HOUR` | `120` | Safety budget for Reddit feed requests |
+| `FEED_RANKING_V2_ENABLED` | `false` | Enable relevance ranking v2 for `/api/articles?sort_by=relevance` |
+| `FEED_NEAR_DEDUP_ENABLED` | `false` | Enable near-duplicate suppression in connector ingestion |
+| `STOCK_CORRELATION_ENABLED` | `false` | Enable optional stock-price enrichment |
+| `STOCK_CORRELATOR_ENABLED` | `false` | Backward-compatible alias for stock correlation toggle |
+| `ADMIN_API_KEY` | _(empty)_ | Protect mutating admin endpoints when set |
+| `ADMIN_ALLOWED_ROLES` | `admin,ops` | Allowed `x-admin-role` values when admin auth is enabled |
+| `ADMIN_RATE_LIMIT_PER_MINUTE` | `30` | Per-actor/IP rate limit for admin endpoints |
+| `FASTAPI_ADMIN_API_KEY` | _(empty)_ | Next.js server-side key for admin proxy routes |
 
 ## 🤝 Contributing
 

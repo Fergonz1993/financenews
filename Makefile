@@ -1,78 +1,130 @@
 # Financial News Project Makefile
 # Development task automation
 
-.PHONY: help install install-dev test test-unit test-integration lint format clean run-api run-dashboard run-cli docs serve-docs build
+PYTHON ?= .venv/bin/python
+PIP ?= .venv/bin/pip
+PYTEST ?= .venv/bin/pytest
+RUFF ?= .venv/bin/ruff
+MYPY ?= .venv/bin/mypy
+
+.PHONY: help install install-dev test test-unit test-integration lint typecheck format clean run run-api run-frontend coverage docker-up docker-down docker-build quality-checkpoint quality-ratchet staging-gate db-backup db-restore db-restore-drill
 
 # Default target
 help:
-	@echo "Available commands:"
-	@echo "  install       Install production dependencies"
-	@echo "  install-dev   Install development dependencies"
-	@echo "  test          Run all tests"
-	@echo "  test-unit     Run unit tests only"
-	@echo "  test-integration  Run integration tests only"
-	@echo "  lint          Run code linting"
-	@echo "  format        Format code with black and isort"
-	@echo "  clean         Clean up cache and temporary files"
-	@echo "  run-api       Start the API server"
-	@echo "  run-dashboard Start the dashboard"
-	@echo "  run-cli       Run the CLI interface"
-	@echo "  docs          Build documentation"
-	@echo "  serve-docs    Serve documentation locally"
-	@echo "  build         Build the package"
+	@echo ""
+	@echo "  Financial News — Development Commands"
+	@echo "  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo ""
+	@echo "  Setup:"
+	@echo "    install          Install production Python dependencies"
+	@echo "    install-dev      Install development dependencies + pre-commit hooks"
+	@echo ""
+	@echo "  Development:"
+	@echo "    run              Start everything (FastAPI + Next.js)"
+	@echo "    run-api          Start FastAPI backend only"
+	@echo "    run-frontend     Start Next.js frontend only (Bun)"
+	@echo ""
+	@echo "  Testing:"
+	@echo "    test             Run all Python tests"
+	@echo "    test-unit        Run unit tests only"
+	@echo "    test-integration Run integration tests only"
+	@echo "    coverage         Run tests with HTML coverage report"
+	@echo ""
+	@echo "  Code Quality:"
+	@echo "    quality-checkpoint  Collect current quality metrics"
+	@echo "    quality-ratchet     Enforce no-regression quality gate"
+	@echo "    lint                Alias for quality-ratchet"
+	@echo ""
+	@echo "  Operations:"
+	@echo "    staging-gate     Run migration/test/ratchet staging release gate"
+	@echo "    db-backup        Create Postgres backup (DATABASE_URL)"
+	@echo "    db-restore       Restore backup (BACKUP_FILE + RESTORE_DATABASE_URL)"
+	@echo "    db-restore-drill Run timed backup+restore drill (DATABASE_URL + DRILL_DATABASE_URL)"
+	@echo ""
+	@echo "  Docker:"
+	@echo "    docker-up        Start all services via Docker Compose"
+	@echo "    docker-down      Stop all Docker services"
+	@echo "    docker-build     Build Docker image"
+	@echo ""
+	@echo "  Other:"
+	@echo "    clean            Remove caches and build artifacts"
+	@echo ""
 
 # Installation
 install:
-	pip install -e .
+	$(PIP) install -e .
 
 install-dev:
-	pip install -e ".[dev]"
-	pre-commit install
+	$(PIP) install -e ".[dev]"
+	.venv/bin/pre-commit install
+
+# Running
+run:
+	$(PYTHON) run_server.py
+
+run-api:
+	PYTHONPATH=src .venv/bin/uvicorn financial_news.api.main:app --reload --port 8000
+
+run-frontend:
+	bun run dev
 
 # Testing
 test:
-	pytest tests/ -v
+	PYTHONPATH=src $(PYTEST) tests/ -v
 
 test-unit:
-	pytest tests/unit/ -v
+	PYTHONPATH=src $(PYTEST) tests/unit/ -v
 
 test-integration:
-	pytest tests/integration/ -v
+	PYTHONPATH=src $(PYTEST) tests/integration/ -v -m integration
+
+coverage:
+	PYTHONPATH=src $(PYTEST) tests/unit/ -v --cov=src/financial_news --cov-report=html --cov-report=term-missing
+	@echo "\n  Coverage report: open htmlcov/index.html"
 
 # Code quality
-lint:
-	flake8 src/ tests/
-	mypy src/
+quality-checkpoint:
+	$(PYTHON) scripts/quality_checkpoint.py collect --output-json output/quality/current.json --output-md output/quality/current.md
+
+quality-ratchet: quality-checkpoint
+	$(PYTHON) scripts/quality_checkpoint.py ratchet --baseline config/quality-baseline.json --current output/quality/current.json
+
+lint: quality-ratchet
+
+typecheck:
+	bun run typecheck
 
 format:
-	black src/ tests/
-	isort src/ tests/
-	autoflake --in-place --remove-unused-variables --remove-all-unused-imports src/ tests/
+	$(RUFF) check src/ tests/ --fix
+	$(RUFF) format src/ tests/
+
+# Operations
+staging-gate:
+	PATH=".venv/bin:$$PATH" $(PYTHON) scripts/ops/staging_release_gate.py --output-json output/ops/staging-gate-report.json
+
+db-backup:
+	PATH=".venv/bin:$$PATH" $(PYTHON) scripts/ops/postgres_ops.py backup --database-url "$${DATABASE_URL}" --output-dir output/ops/backups --retention-days 7
+
+db-restore:
+	PATH=".venv/bin:$$PATH" $(PYTHON) scripts/ops/postgres_ops.py restore --backup-file "$${BACKUP_FILE}" --target-database-url "$${RESTORE_DATABASE_URL}" --recreate-target
+
+db-restore-drill:
+	PATH=".venv/bin:$$PATH" $(PYTHON) scripts/ops/postgres_ops.py drill --source-database-url "$${DATABASE_URL}" --target-database-url "$${DRILL_DATABASE_URL}" --output-json output/ops/restore-drill-report.json
+
+# Docker
+docker-up:
+	docker compose up -d --build
+
+docker-down:
+	docker compose down
+
+docker-build:
+	docker build -t financenews:latest .
 
 # Cleanup
 clean:
-	find . -type d -name "__pycache__" -exec rm -rf {} +
-	find . -type f -name "*.pyc" -delete
-	find . -type d -name "*.egg-info" -exec rm -rf {} +
-	rm -rf build/ dist/
-
-# Running applications
-run-api:
-	python -m financial_news.api.main
-
-run-dashboard:
-	python -m financial_news.dashboard.app
-
-run-cli:
-	python -m financial_news.cli.main
-
-# Documentation
-docs:
-	mkdocs build
-
-serve-docs:
-	mkdocs serve
-
-# Build
-build:
-	python -m build 
+	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+	find . -type f -name "*.pyc" -delete 2>/dev/null || true
+	find . -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
+	rm -rf build/ dist/ htmlcov/ .coverage coverage.xml output/quality
+	@echo "  Cleaned!"

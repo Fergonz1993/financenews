@@ -5,35 +5,40 @@ from __future__ import annotations
 
 import asyncio
 import calendar
+import hashlib
 import html
 import json
 import logging
 import os
-import hashlib
-import random
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from uuid import uuid4
 
 import aiohttp
 import feedparser
 
+from financial_news.core.sentiment import (
+    analyze_article_sentiment,
+    get_sentiment_analyzer,
+)
 from financial_news.core.summarizer import Article
-from financial_news.core.sentiment import analyze_article_sentiment, get_sentiment_analyzer
 from financial_news.storage import (
     ArticleRepository,
     IngestionRunRepository,
     IngestionStateRepository,
-    SourceRepository,
     SourceConfig,
+    SourceRepository,
     get_session_factory,
     initialize_schema,
 )
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 logger = logging.getLogger(__name__)
 
@@ -246,21 +251,21 @@ def _canonicalize_url(value: str) -> str:
 
 def _coerce_datetime(value: Any) -> datetime:
     if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
     if not value:
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
     if isinstance(value, str):
         try:
             parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
         except ValueError:
-            return datetime.now(timezone.utc)
-    return datetime.now(timezone.utc)
+            return datetime.now(UTC)
+    return datetime.now(UTC)
 
 
 def _parse_published_time(entry: Any) -> datetime:
     if not isinstance(entry, dict):
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
     published_parsed = entry.get("published_parsed")
     candidate = entry.get("published")
     if candidate and isinstance(candidate, str):
@@ -269,7 +274,7 @@ def _parse_published_time(entry: Any) -> datetime:
             return parsed
     if isinstance(published_parsed, tuple):
         try:
-            return datetime.fromtimestamp(calendar.timegm(published_parsed), tz=timezone.utc)
+            return datetime.fromtimestamp(calendar.timegm(published_parsed), tz=UTC)
         except (TypeError, ValueError):
             pass
     updated = entry.get("updated")
@@ -277,7 +282,7 @@ def _parse_published_time(entry: Any) -> datetime:
         parsed = _parse_datetime(updated)
         if parsed is not None:
             return parsed
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _parse_datetime(value: Any) -> datetime | None:
@@ -285,13 +290,11 @@ def _parse_datetime(value: Any) -> datetime | None:
         return None
     try:
         parsed = parsedate_to_datetime(value)
-        if parsed is None:
-            return None
-        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
     except (TypeError, ValueError, OverflowError):
         try:
             parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
         except (TypeError, ValueError):
             return None
 
@@ -335,10 +338,7 @@ def _to_text(value: Any) -> str:
         return ""
     if isinstance(value, list) and value:
         first = value[0]
-        if isinstance(first, dict):
-            value = first.get("value", "")
-        else:
-            value = str(first)
+        value = first.get("value", "") if isinstance(first, dict) else str(first)
     return str(value).strip()
 
 
@@ -475,7 +475,7 @@ def _hash_value(value: str) -> str:
 
 
 def _elapsed_ms(start_at: datetime) -> int:
-    return int((datetime.now(timezone.utc) - start_at).total_seconds() * 1000)
+    return int((datetime.now(UTC) - start_at).total_seconds() * 1000)
 
 
 def _iso_or_none(value: datetime | None) -> str | None:
@@ -550,17 +550,17 @@ class IngestRunResult:
     source_errors: int = 0
     errors: list[str] = field(default_factory=list)
     source_results: list[dict[str, Any]] = field(default_factory=list)
-    started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     finished_at: datetime | None = None
 
     @property
     def duration_seconds(self) -> float:
-        finished = self.finished_at or datetime.now(timezone.utc)
+        finished = self.finished_at or datetime.now(UTC)
         return (finished - self.started_at).total_seconds()
 
     def finish(self, status: str) -> None:
         self.status = status
-        self.finished_at = datetime.now(timezone.utc)
+        self.finished_at = datetime.now(UTC)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -576,7 +576,7 @@ class IngestRunResult:
             "errors": self.errors,
             "source_results": self.source_results,
             "started_at": self.started_at.isoformat(),
-            "finished_at": (self.finished_at or datetime.now(timezone.utc)).isoformat(),
+            "finished_at": (self.finished_at or datetime.now(UTC)).isoformat(),
             "duration_seconds": self.duration_seconds,
         }
 
@@ -592,7 +592,7 @@ class NewsIngestor:
         min_entry_content_chars: int = DEFAULT_MIN_ENTRY_CONTENT_CHARS,
         max_full_text_chars: int = DEFAULT_MAX_FULL_TEXT_CHARS,
         legacy_json_path: Path | str | None = None,
-        session_factory=None,
+        session_factory: async_sessionmaker[AsyncSession] | None = None,
     ) -> None:
         if session_factory is None:
             session_factory = get_session_factory()
@@ -619,7 +619,9 @@ class NewsIngestor:
             and os.getenv("ENVIRONMENT", "development").strip().lower() != "production"
         )
         self._legacy_storage_path = Path(
-            legacy_json_path or os.getenv("LEGACY_ARTICLES_PATH", str(DEFAULT_LEGACY_STORAGE_PATH))
+            legacy_json_path
+            or os.getenv("LEGACY_ARTICLES_PATH")
+            or str(DEFAULT_LEGACY_STORAGE_PATH)
         )
         self._last_run = IngestRunResult(run_id="init", requested_sources=0, status="initialized")
         self._last_run.finish("stopped")
@@ -640,7 +642,7 @@ class NewsIngestor:
             active_sources = [source for source in active_sources if source.enabled]
 
             if source_ids:
-                ids = {int(item) for item in source_ids if isinstance(item, int) or str(item).isdigit()}
+                ids = set(source_ids)
                 active_sources = [source for source in active_sources if source.id in ids]
 
             if sources is not None:
@@ -786,7 +788,7 @@ class NewsIngestor:
             parsed_host = parsed_source_url.netloc.lower()
             source_type = "sec" if "sec.gov" in parsed_host else "rss"
             metadata = _infer_source_metadata(name, source_url, source_type)
-            contract = dict(parser_contract)
+            contract: dict[str, Any] = dict(parser_contract)
             if source_type == "sec":
                 contract.update(
                     {
@@ -844,6 +846,12 @@ class NewsIngestor:
         task.add_done_callback(self._on_run_complete)
         return run_id
 
+    def is_running(self) -> bool:
+        return self._run_lock.locked()
+
+    def active_run_ids(self) -> list[str]:
+        return list(self._run_tasks.keys())
+
     def _on_run_complete(self, task: asyncio.Task[IngestRunResult]) -> None:
         run_id = None
         for key, value in list(self._run_tasks.items()):
@@ -857,7 +865,7 @@ class NewsIngestor:
         except Exception as exc:
             logger.warning("Ingest background task failed run_id=%s err=%s", run_id, exc)
 
-    async def _run_source(self, source, run_id: str) -> SourceResult:
+    async def _run_source(self, source: Any, run_id: str) -> SourceResult:
         if not source.id:
             return SourceResult(
                 source_id=0,
@@ -879,7 +887,7 @@ class NewsIngestor:
             return result
 
         state = await self._state_repo.get_for_source(source.id)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         if (
             state
             and state.disabled_by_failure
@@ -890,17 +898,15 @@ class NewsIngestor:
             result.error = "Source paused by backoff"
             return result
 
-        source_start = datetime.now(timezone.utc)
-        configured_user_agent = (
+        source_start = datetime.now(UTC)
+        configured_user_agent = str(
             getattr(source, "user_agent", None)
             or os.getenv(
                 "NEWS_INGEST_USER_AGENT",
                 "finnews-ingest/1.0 (+https://example.com/finnews)",
             )
         )
-        headers = {
-            "User-Agent": configured_user_agent
-        }
+        headers: dict[str, str] = {"User-Agent": configured_user_agent}
         parser_contract = source.parser_contract_json or {}
         if getattr(source, "requires_api_key", False):
             api_key_env = str(parser_contract.get("api_key_env") or "").strip()
@@ -938,11 +944,13 @@ class NewsIngestor:
                 result.items_seen = len(parsed_items)
                 result.latest_cursor = None
                 if parsed_items:
-                    result.latest_cursor = max(
-                        item.get("published_at", datetime.now(timezone.utc)).isoformat()
+                    published_datetimes = [
+                        published
                         for item in parsed_items
-                        if isinstance(item.get("published_at"), datetime)
-                    )
+                        if isinstance((published := item.get("published_at")), datetime)
+                    ]
+                    if published_datetimes:
+                        result.latest_cursor = max(published_datetimes).isoformat()
 
                 write_result = await self._article_repo.upsert_deduplicated(
                     run_id=run_id,
@@ -956,26 +964,28 @@ class NewsIngestor:
                 else:
                     result.status = "completed_empty"
 
-            latest = None
-            if parsed_items:
-                dates = [
-                    item.get("published_at")
-                    for item in parsed_items
-                    if isinstance(item.get("published_at"), datetime)
-                ]
-                if dates:
-                    latest = max(dates)
-            cursor_value = latest.isoformat() if latest else (state.cursor_value if state else None)
-            await self._state_repo.mark_source_success(
-                source.id,
-                cursor_type="published_at",
-                cursor_value=cursor_value,
-                last_published_at=latest,
-                latency_ms=_elapsed_ms(source_start),
-                etag=etag,
-            )
-            result.latency_ms = _elapsed_ms(source_start)
-            return result
+                latest = None
+                if parsed_items:
+                    dates = [
+                        published
+                        for item in parsed_items
+                        if isinstance((published := item.get("published_at")), datetime)
+                    ]
+                    if dates:
+                        latest = max(dates)
+                cursor_value = (
+                    latest.isoformat() if latest else (state.cursor_value if state else None)
+                )
+                await self._state_repo.mark_source_success(
+                    source.id,
+                    cursor_type="published_at",
+                    cursor_value=cursor_value,
+                    last_published_at=latest,
+                    latency_ms=_elapsed_ms(source_start),
+                    etag=etag,
+                )
+                result.latency_ms = _elapsed_ms(source_start)
+                return result
         except Exception as exc:
             logger.exception("Source ingest failure source=%s", source.id)
             cursor_value = state.cursor_value if state else None
@@ -1146,7 +1156,7 @@ class NewsIngestor:
         payload.source_errors = run.source_errors
         payload.errors = run.error_summary or []
         payload.source_results = _normalize_json_list(run.source_results)
-        payload.started_at = run.started_at or datetime.now(timezone.utc)
+        payload.started_at = run.started_at or datetime.now(UTC)
         payload.finished_at = run.finished_at
         return payload
 
@@ -1277,7 +1287,7 @@ async def _entry_to_record(
         and not _is_google_news_wrapper_url(link)
     )
 
-    if should_fetch_full_text:
+    if should_fetch_full_text and session is not None:
         fallback = await _fetch_entry_full_text(
             session=session,
             source_url=link,
@@ -1311,7 +1321,7 @@ async def _entry_to_record(
     )
     article.key_entities = _extract_entities(f"{title} {content}")
     article.topics = _extract_topics(f"{title} {content}")
-    article.processed_at = datetime.now(timezone.utc)
+    article.processed_at = datetime.now(UTC)
 
     return {
         "id": article.id,

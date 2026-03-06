@@ -127,7 +127,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (action === 'run_now') {
       try {
         const result = await fastApiRequest<Record<string, unknown>>({
-          path: '/api/ingest/trigger',
+          path: '/api/admin/ingest/run',
           method: 'POST',
           req,
         });

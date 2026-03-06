@@ -9,6 +9,8 @@ from .models import (
     IngestionState,
     Source,
     UserSavedArticle,
+    UserSettings,
+    UserAlertPreferences,
 )
 from .repositories import (
     ArticleRepository,
@@ -16,6 +18,8 @@ from .repositories import (
     IngestionStateRepository,
     SourceConfig,
     SourceRepository,
+    UserSettingsRepository,
+    UserAlertPreferencesRepository,
     UserArticleStateRepository,
 )
 
@@ -27,11 +31,15 @@ __all__ = [
     "IngestionRun",
     "IngestionState",
     "UserSavedArticle",
+    "UserSettings",
+    "UserAlertPreferences",
     "ArticleRepository",
     "SourceRepository",
     "SourceConfig",
     "IngestionStateRepository",
     "IngestionRunRepository",
+    "UserSettingsRepository",
+    "UserAlertPreferencesRepository",
     "UserArticleStateRepository",
     "get_engine",
     "get_session_factory",

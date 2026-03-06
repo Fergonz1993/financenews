@@ -17,6 +17,7 @@ from typing import Any
 import aiohttp
 
 from financial_news.core.sentiment import analyze_article_sentiment
+from financial_news.services.connectors.base import BaseConnector
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +73,11 @@ def _extract_topics(text: str) -> list[str]:
     return topics[:3] or ["Markets"]
 
 
-class GDELTConnector:
+class GDELTConnector(BaseConnector):
     """Fetch financial news articles from GDELT v2 DOC API."""
+
+    name = "GDELT"
+    requires_api_key = False
 
     DEFAULT_QUERIES = [
         "finance stock market",

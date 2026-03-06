@@ -385,3 +385,5 @@ dump.rdb
 output/
 test-results/
 tsconfig.tsbuildinfo
+.ralph*/
+RALPH_FEEDBACK*.md

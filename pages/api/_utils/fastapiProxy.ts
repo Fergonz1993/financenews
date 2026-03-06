@@ -22,6 +22,8 @@ const FASTAPI_GET_RETRIES = Math.max(
   0,
   Number.parseInt(process.env.FASTAPI_GET_RETRIES || '1', 10) || 0
 );
+const FASTAPI_ADMIN_API_KEY =
+  process.env.FASTAPI_ADMIN_API_KEY || process.env.ADMIN_API_KEY || '';
 
 export class FastApiProxyError extends Error {
   status: number;
@@ -149,6 +151,26 @@ export async function fastApiRequest<T = unknown>({
   }
   if (req?.headers.authorization) {
     headers.Authorization = req.headers.authorization;
+  }
+  const adminApiKeyHeader =
+    req?.headers['x-admin-key'] ||
+    req?.headers['x-admin-api-key'] ||
+    req?.headers['x-api-key'];
+  if (adminApiKeyHeader) {
+    headers['X-Admin-Key'] = String(adminApiKeyHeader);
+    headers['X-Admin-Api-Key'] = String(adminApiKeyHeader);
+  } else if (FASTAPI_ADMIN_API_KEY) {
+    headers['X-Admin-Key'] = FASTAPI_ADMIN_API_KEY;
+    headers['X-Admin-Api-Key'] = FASTAPI_ADMIN_API_KEY;
+  }
+  if (req?.headers['x-admin-role']) {
+    headers['X-Admin-Role'] = String(req.headers['x-admin-role']);
+  }
+  if (req?.headers['x-admin-user']) {
+    headers['X-Admin-User'] = String(req.headers['x-admin-user']);
+  }
+  if (req?.headers['x-admin-actor']) {
+    headers['X-Admin-Actor'] = String(req.headers['x-admin-actor']);
   }
   if (req?.headers.cookie) {
     headers.Cookie = String(req.headers.cookie);

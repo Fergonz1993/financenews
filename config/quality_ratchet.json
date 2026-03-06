@@ -1,0 +1,7 @@
+{
+  "max_ruff_violations": 433,
+  "max_mypy_errors": 547,
+  "min_python_coverage_pct": 26.0,
+  "max_smoke_p95_ms": 1200,
+  "max_ingest_freshness_lag_seconds": 172800
+}
