@@ -42,4 +42,4 @@ alembic==1.13.0
 # Optional for advanced features
 streamlit==1.50.0
 fastapi==0.128.8
-uvicorn==0.39.0
+uvicorn==0.41.0
