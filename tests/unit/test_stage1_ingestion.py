@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 import financial_news.services.news_ingest as news_ingest
+from financial_news.core.schemas import ParsedArticle
 from financial_news.services.news_ingest import NewsIngestor, SourceResult
 from financial_news.storage.repositories import IngestResult
 
@@ -168,7 +169,7 @@ async def test_entry_to_record_skips_full_text_fetch_for_google_news_wrapper(
 
     assert record is not None
     assert called is False
-    assert record["content"] == "Stocks rose after the announcement."
+    assert record.content == "Stocks rose after the announcement."
 
 
 @pytest.mark.asyncio
@@ -188,15 +189,15 @@ async def test_fetch_and_parse_source_filters_by_published_cursor(monkeypatch: p
         source_name: str,
         entry: dict[str, Any],
         **kwargs: Any,
-    ) -> dict[str, Any]:
-        return {
-            "id": entry["id"],
-            "source": source_name,
-            "title": entry["title"],
-            "url": entry["link"],
-            "content": entry.get("content", ""),
-            "published_at": datetime.fromisoformat(entry["published"]),
-        }
+    ) -> ParsedArticle:
+        return ParsedArticle(
+            id=entry["id"],
+            source_name=source_name,
+            title=entry["title"],
+            url=entry["link"],
+            content=entry.get("content", ""),
+            published_at=datetime.fromisoformat(entry["published"]),
+        )
 
     async def fake_fetch_feed(
         session: Any,
@@ -243,8 +244,8 @@ async def test_fetch_and_parse_source_filters_by_published_cursor(monkeypatch: p
 
     assert etag == 'W/"123"'
     assert len(parsed) == 1
-    assert parsed[0]["id"] == "new"
-    assert parsed[0]["title"] == "New Item"
+    assert parsed[0].id == "new"
+    assert parsed[0].title == "New Item"
 
 
 @pytest.mark.asyncio
@@ -265,15 +266,15 @@ async def test_fetch_and_parse_source_adds_since_query_for_supported_contract(mo
         source_name: str,
         entry: dict[str, Any],
         **kwargs: Any,
-    ) -> dict[str, Any]:
-        return {
-            "id": entry["id"],
-            "source": source_name,
-            "title": entry["title"],
-            "url": entry["link"],
-            "content": entry.get("content", ""),
-            "published_at": datetime.fromisoformat(entry["published"]),
-        }
+    ) -> ParsedArticle:
+        return ParsedArticle(
+            id=entry["id"],
+            source_name=source_name,
+            title=entry["title"],
+            url=entry["link"],
+            content=entry.get("content", ""),
+            published_at=datetime.fromisoformat(entry["published"]),
+        )
 
     async def fake_fetch_feed(
         session: Any,
@@ -313,7 +314,7 @@ async def test_fetch_and_parse_source_adds_since_query_for_supported_contract(mo
     assert "from=2025-02-20T10%3A00%3A00%2B00%3A00" in captured["source_url"]
     assert captured["source_url"].startswith("https://www.sec.gov/api")
     assert len(parsed) == 1
-    assert parsed[0]["source"] == "SEC Source"
+    assert parsed[0].source_name == "SEC Source"
 
 
 @dataclass
