@@ -123,7 +123,6 @@ jobs:
         run: bun run typecheck
 
       - name: ESLint
-        continue-on-error: true  # 1 pre-existing error — fix incrementally
         run: bun run lint
 
       - name: Run frontend smoke suite
