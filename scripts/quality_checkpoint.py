@@ -108,6 +108,14 @@ def _git_stdout_lines(command: list[str]) -> list[str]:
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
+def _git_command_succeeds(command: list[str]) -> bool:
+    return run_command(command).return_code == 0
+
+
+def _git_has_head_parent() -> bool:
+    return _git_command_succeeds(["git", "rev-parse", "--verify", "HEAD^"])
+
+
 def discover_active_module_paths() -> tuple[str, ...]:
     discovered_paths: list[str] = []
     quality_base_ref = os.getenv("QUALITY_BASE_REF")
@@ -130,7 +138,12 @@ def discover_active_module_paths() -> tuple[str, ...]:
     discovered_paths.extend(
         _git_stdout_lines(["git", "diff", "--name-only", "--diff-filter=ACMRTUXB", "HEAD"])
     )
-    discovered_paths.extend(_git_stdout_lines(["git", "show", "--pretty=", "--name-only", "HEAD"]))
+    if _git_has_head_parent():
+        discovered_paths.extend(
+            _git_stdout_lines(
+                ["git", "diff", "--name-only", "--diff-filter=ACMRTUXB", "HEAD^", "HEAD"]
+            )
+        )
     discovered_paths.extend(
         _git_stdout_lines(["git", "ls-files", "--others", "--exclude-standard"])
     )
