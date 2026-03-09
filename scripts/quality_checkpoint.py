@@ -73,6 +73,18 @@ def resolve_local_bin(executable: str) -> str:
     return executable
 
 
+def _command_diagnostics(result: CommandResult, *, max_chars: int = 4000) -> dict[str, str]:
+    if result.return_code == 0:
+        return {}
+
+    diagnostics: dict[str, str] = {}
+    if result.stdout.strip():
+        diagnostics["stdout_tail"] = result.stdout[-max_chars:]
+    if result.stderr.strip():
+        diagnostics["stderr_tail"] = result.stderr[-max_chars:]
+    return diagnostics
+
+
 def _normalize_repo_path(path: str) -> str:
     return path.strip().replace("\\", "/")
 
@@ -324,6 +336,7 @@ def collect_metrics(include_smoke: bool) -> dict[str, Any]:
     metrics["commands"]["ruff"] = {
         "command": ruff_result.command,
         "return_code": ruff_result.return_code,
+        **_command_diagnostics(ruff_result),
     }
     metrics["ruff_errors"] = parse_ruff_errors(ruff_result.stdout)
     ruff_active_breakdown = parse_ruff_errors_by_path(
@@ -343,6 +356,7 @@ def collect_metrics(include_smoke: bool) -> dict[str, Any]:
     metrics["commands"]["mypy"] = {
         "command": mypy_result.command,
         "return_code": mypy_result.return_code,
+        **_command_diagnostics(mypy_result),
     }
     mypy_combined = mypy_result.stdout + "\n" + mypy_result.stderr
     metrics["mypy_errors"] = parse_mypy_errors(mypy_combined)
@@ -363,6 +377,7 @@ def collect_metrics(include_smoke: bool) -> dict[str, Any]:
     metrics["commands"]["pytest_unit_coverage"] = {
         "command": pytest_result.command,
         "return_code": pytest_result.return_code,
+        **_command_diagnostics(pytest_result),
     }
     metrics["unit_tests_passed"] = pytest_result.return_code == 0
     metrics["coverage_unit_pct"] = parse_pytest_coverage_pct(pytest_result.stdout)
@@ -371,6 +386,7 @@ def collect_metrics(include_smoke: bool) -> dict[str, Any]:
     metrics["commands"]["tsc"] = {
         "command": tsc_result.command,
         "return_code": tsc_result.return_code,
+        **_command_diagnostics(tsc_result),
     }
     metrics["tsc_passed"] = tsc_result.return_code == 0
 
@@ -378,6 +394,7 @@ def collect_metrics(include_smoke: bool) -> dict[str, Any]:
     metrics["commands"]["eslint"] = {
         "command": eslint_result.command,
         "return_code": eslint_result.return_code,
+        **_command_diagnostics(eslint_result),
     }
     metrics["eslint_passed"] = eslint_result.return_code == 0
     metrics["eslint_warnings"] = parse_eslint_warnings(eslint_result.stdout + "\n" + eslint_result.stderr)
@@ -388,6 +405,7 @@ def collect_metrics(include_smoke: bool) -> dict[str, Any]:
         metrics["commands"]["smoke_frontend"] = {
             "command": smoke_result.command,
             "return_code": smoke_result.return_code,
+            **_command_diagnostics(smoke_result),
         }
         smoke_passed = smoke_result.return_code == 0
     metrics["smoke_frontend_passed"] = smoke_passed
@@ -453,6 +471,30 @@ def render_markdown(metrics: dict[str, Any]) -> str:
     commands = metrics.get("commands", {})
     for name, payload in commands.items():
         lines.append(f"- `{name}`: `{payload.get('command')}` (rc={payload.get('return_code')})")
+        stdout_tail = payload.get("stdout_tail")
+        stderr_tail = payload.get("stderr_tail")
+        if stdout_tail:
+            lines.extend(
+                [
+                    "",
+                    f"  stdout tail for `{name}`:",
+                    "",
+                    "  ```text",
+                    *(f"  {line}" for line in str(stdout_tail).splitlines()),
+                    "  ```",
+                ]
+            )
+        if stderr_tail:
+            lines.extend(
+                [
+                    "",
+                    f"  stderr tail for `{name}`:",
+                    "",
+                    "  ```text",
+                    *(f"  {line}" for line in str(stderr_tail).splitlines()),
+                    "  ```",
+                ]
+            )
 
     return "\n".join(lines) + "\n"
 
@@ -549,6 +591,15 @@ def ratchet_against_baseline(
     for key, label in required_bools.items():
         if baseline.get(f"require_{key}", True) and not bool(current.get(key)):
             failures.append(f"{label} failed")
+            command_name = "pytest_unit_coverage" if key == "unit_tests_passed" else None
+            if command_name:
+                command_payload = current.get("commands", {}).get(command_name, {})
+                stdout_tail = command_payload.get("stdout_tail")
+                stderr_tail = command_payload.get("stderr_tail")
+                if stdout_tail:
+                    failures.append(f"{label} stdout tail:\n{stdout_tail}")
+                if stderr_tail:
+                    failures.append(f"{label} stderr tail:\n{stderr_tail}")
 
     if baseline.get("require_smoke_frontend", False) and not bool(
         current.get("smoke_frontend_passed")
