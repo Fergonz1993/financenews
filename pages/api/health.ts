@@ -12,7 +12,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     Promise.resolve(localDataDiagnostics()),
   ]);
 
-  const fallbackReady = local.fallback_enabled && local.local_articles_count > 0;
+  const fallbackReady = local.fallback_enabled;
   const mode = backend.reachable ? 'backend' : fallbackReady ? 'fallback' : 'degraded';
   const statusCode = mode === 'degraded' ? 503 : 200;
 
