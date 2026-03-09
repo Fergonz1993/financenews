@@ -876,6 +876,7 @@ dependencies = [
     { name = "cachetools" },
     { name = "click" },
     { name = "colorlog" },
+    { name = "fastapi" },
     { name = "feedparser" },
     { name = "finnhub-python" },
     { name = "fuzzywuzzy" },
@@ -898,6 +899,7 @@ dependencies = [
     { name = "textblob" },
     { name = "tiktoken" },
     { name = "tqdm" },
+    { name = "uvicorn" },
 ]
 
 [package.optional-dependencies]
@@ -911,7 +913,6 @@ ai = [
 all = [
     { name = "aiokafka" },
     { name = "asyncio-mqtt" },
-    { name = "fastapi" },
     { name = "librosa" },
     { name = "moviepy" },
     { name = "networkx" },
@@ -924,7 +925,6 @@ all = [
     { name = "torch" },
     { name = "torch-geometric" },
     { name = "transformers" },
-    { name = "uvicorn" },
     { name = "websockets" },
     { name = "whisper" },
     { name = "yfinance" },
@@ -958,9 +958,7 @@ realtime = [
     { name = "websockets" },
 ]
 web = [
-    { name = "fastapi" },
     { name = "streamlit" },
-    { name = "uvicorn" },
 ]
 
 [package.metadata]
@@ -976,7 +974,7 @@ requires-dist = [
     { name = "cachetools", specifier = ">=6.2.6" },
     { name = "click", specifier = ">=8.1.8" },
     { name = "colorlog", specifier = ">=6.10.1" },
-    { name = "fastapi", marker = "extra == 'web'", specifier = ">=0.128.8" },
+    { name = "fastapi", specifier = ">=0.128.8" },
     { name = "feedparser", specifier = ">=6.0.12" },
     { name = "financial-news-summarizer", extras = ["ai", "multimedia", "web", "realtime", "graph"], marker = "extra == 'all'" },
     { name = "finnhub-python", specifier = ">=2.4.27" },
@@ -1018,7 +1016,7 @@ requires-dist = [
     { name = "torch-geometric", marker = "extra == 'graph'", specifier = ">=2.3.0" },
     { name = "tqdm", specifier = ">=4.67.3" },
     { name = "transformers", marker = "extra == 'ai'", specifier = ">=4.30.0" },
-    { name = "uvicorn", marker = "extra == 'web'", specifier = ">=0.39.0" },
+    { name = "uvicorn", specifier = ">=0.39.0" },
     { name = "websockets", marker = "extra == 'realtime'", specifier = ">=11.0.0" },
     { name = "whisper", marker = "extra == 'multimedia'", specifier = ">=1.0.0" },
     { name = "yfinance", marker = "extra == 'ai'", specifier = ">=0.2.0" },

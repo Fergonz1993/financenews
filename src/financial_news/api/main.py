@@ -220,7 +220,7 @@ def _request_id_from_request(request: Request | None) -> str:
 def _request_actor_from_headers(request: Request, *, trusted: bool = True) -> str:
     actor = request.headers.get("x-admin-user") or request.headers.get("x-admin-actor")
     if actor:
-        return actor.strip()
+        return str(actor).strip()
     if not trusted:
         return "anonymous"
     client = request.client.host if request.client else "unknown"
@@ -267,7 +267,8 @@ def _require_admin_access(request: Request) -> str:
     if ADMIN_ALLOWED_ROLES and role not in ADMIN_ALLOWED_ROLES:
         raise HTTPException(status_code=403, detail="Insufficient admin role")
 
-    return request.headers.get("x-admin-user", role or "admin")
+    admin_user = request.headers.get("x-admin-user", role or "admin")
+    return str(admin_user)
 
 
 def _coerce_float(value: Any) -> float | None:
@@ -407,10 +408,10 @@ def _resolve_user_id(request: Request, explicit_user_id: str | None = None) -> s
         return explicit_user_id.strip()
     header_user_id = request.headers.get("x-user-id")
     if header_user_id and header_user_id.strip():
-        return header_user_id.strip()
+        return str(header_user_id).strip()
     query_user_id = request.query_params.get("user_id")
     if query_user_id and query_user_id.strip():
-        return query_user_id.strip()
+        return str(query_user_id).strip()
     return "anonymous"
 
 
