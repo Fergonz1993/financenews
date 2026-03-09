@@ -328,7 +328,7 @@ briefings/
 *.tmp
 temp/
 cache/
-data/
+/data/
 checkpoints/
 
 # API keys and secrets
