@@ -8,10 +8,7 @@ deliberately if the change is intentional.
 
 from __future__ import annotations
 
-import pytest
-
 from financial_news.api.main import app
-
 
 # ---------------------------------------------------------------------------
 # Snapshot of every public API path + method as of 2026-03-06.
@@ -20,6 +17,8 @@ from financial_news.api.main import app
 EXPECTED_PATHS: set[tuple[str, str]] = {
     ("GET", "/"),
     ("GET", "/health"),
+    ("GET", "/health/live"),
+    ("GET", "/health/ready"),
     # --- Articles ---
     ("GET", "/api/articles"),
     ("GET", "/api/articles/count"),
@@ -132,6 +131,13 @@ class TestApiResponseSchemas:
         schema = app.openapi()
         health_path = schema["paths"].get("/health", {})
         get_op = health_path.get("get", {})
+        assert "responses" in get_op
+        assert "200" in get_op["responses"]
+
+    def test_readiness_endpoint_has_response_schema(self) -> None:
+        schema = app.openapi()
+        readiness_path = schema["paths"].get("/health/ready", {})
+        get_op = readiness_path.get("get", {})
         assert "responses" in get_op
         assert "200" in get_op["responses"]
 

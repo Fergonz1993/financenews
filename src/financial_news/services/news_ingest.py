@@ -27,7 +27,6 @@ from financial_news.core.sentiment import (
     analyze_article_sentiment,
     get_sentiment_analyzer,
 )
-from financial_news.core.summarizer import Article
 from financial_news.storage import (
     ArticleRepository,
     IngestionRunRepository,
@@ -36,6 +35,12 @@ from financial_news.storage import (
     SourceRepository,
     get_session_factory,
     initialize_schema,
+)
+from financial_news.utils import (
+    canonicalize_url,
+    coerce_datetime_utc,
+    coerce_string_list,
+    slugify_value,
 )
 
 if TYPE_CHECKING:
@@ -229,39 +234,15 @@ def _parse_bool(value: Any, default: bool = False) -> bool:
 
 
 def _slugify_filter(value: str) -> str:
-    return _FILTER_RE.sub("-", str(value).strip().lower()).strip("-")
+    return slugify_value(value)
 
 
 def _canonicalize_url(value: str) -> str:
-    if not value:
-        return ""
-    parsed = urlparse(value)
-    query_pairs = [(k, v) for k, v in parse_qsl(parsed.query, keep_blank_values=True)]
-    cleaned_query = "&".join(
-        [
-            f"{name}={value}"
-            for name, value in query_pairs
-            if not name.lower().startswith(("utm_", "ref_", "source", "session"))
-            and not name.lower().endswith("clid")
-        ]
-    )
-    rebuilt = parsed._replace(query=cleaned_query, fragment="")
-    canonical = urlunparse(rebuilt).rstrip("/")
-    return canonical
+    return canonicalize_url(value)
 
 
 def _coerce_datetime(value: Any) -> datetime:
-    if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=UTC)
-    if not value:
-        return datetime.now(UTC)
-    if isinstance(value, str):
-        try:
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-            return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
-        except ValueError:
-            return datetime.now(UTC)
-    return datetime.now(UTC)
+    return coerce_datetime_utc(value, default=datetime.now(UTC))
 
 
 def _parse_published_time(entry: Any) -> datetime:
@@ -326,12 +307,7 @@ def _coerce_float(value: Any) -> float | None:
 
 
 def _coerce_list(value: Any, *, max_items: int = 20) -> list[str]:
-    if not value:
-        return []
-    if isinstance(value, list):
-        values = [str(item).strip() for item in value if str(item).strip()]
-        return values[:max_items]
-    return [str(value).strip()] if str(value).strip() else []
+    return coerce_string_list(value, max_items=max_items)
 
 
 def _to_text(value: Any) -> str:
@@ -1334,6 +1310,7 @@ async def _entry_to_record(
         market_impact_score=market_impact_score,
         key_entities=key_entities,
         topics=topics,
+        relevance_precision=None,
     )
 
 

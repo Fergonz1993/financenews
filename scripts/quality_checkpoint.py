@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shlex
 import statistics
@@ -24,12 +25,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-ACTIVE_MODULE_PATHS = (
+LEGACY_ACTIVE_MODULE_PATHS = (
     "src/financial_news/api/main.py",
     "src/financial_news/services/news_ingest.py",
     "src/financial_news/services/continuous_runner.py",
     "src/financial_news/storage/repositories.py",
 )
+ACTIVE_MODULE_DISCOVERY_PREFIXES = ("src/", "tests/")
 
 
 @dataclass
@@ -69,6 +71,79 @@ def resolve_local_bin(executable: str) -> str:
     if local.exists() and local.is_file():
         return str(local)
     return executable
+
+
+def _normalize_repo_path(path: str) -> str:
+    return path.strip().replace("\\", "/")
+
+
+def _is_relevant_active_module(path: str) -> bool:
+    normalized = _normalize_repo_path(path)
+    return (
+        bool(normalized)
+        and normalized.endswith(".py")
+        and any(
+            normalized.startswith(prefix)
+            for prefix in ACTIVE_MODULE_DISCOVERY_PREFIXES
+        )
+        and Path(normalized).exists()
+    )
+
+
+def _dedupe_paths(paths: list[str]) -> tuple[str, ...]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for path in paths:
+        normalized = _normalize_repo_path(path)
+        if normalized and normalized not in seen:
+            deduped.append(normalized)
+            seen.add(normalized)
+    return tuple(deduped)
+
+
+def _git_stdout_lines(command: list[str]) -> list[str]:
+    result = run_command(command)
+    if result.return_code != 0:
+        return []
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def discover_active_module_paths() -> tuple[str, ...]:
+    discovered_paths: list[str] = []
+    quality_base_ref = os.getenv("QUALITY_BASE_REF")
+    quality_head_ref = os.getenv("QUALITY_HEAD_REF", "HEAD")
+
+    if quality_base_ref:
+        discovered_paths.extend(
+            _git_stdout_lines(
+                [
+                    "git",
+                    "diff",
+                    "--name-only",
+                    "--diff-filter=ACMRTUXB",
+                    quality_base_ref,
+                    quality_head_ref,
+                ]
+            )
+        )
+
+    discovered_paths.extend(
+        _git_stdout_lines(["git", "diff", "--name-only", "--diff-filter=ACMRTUXB", "HEAD"])
+    )
+    discovered_paths.extend(_git_stdout_lines(["git", "show", "--pretty=", "--name-only", "HEAD"]))
+    discovered_paths.extend(
+        _git_stdout_lines(["git", "ls-files", "--others", "--exclude-standard"])
+    )
+
+    relevant_paths = [
+        path
+        for path in discovered_paths
+        if _is_relevant_active_module(path)
+    ]
+    active_module_paths = _dedupe_paths(relevant_paths)
+    if active_module_paths:
+        return active_module_paths
+    return LEGACY_ACTIVE_MODULE_PATHS
 
 
 def parse_ruff_errors(output: str) -> int:
@@ -222,6 +297,7 @@ def collect_metrics(include_smoke: bool) -> dict[str, Any]:
         "generated_at": datetime.now(UTC).isoformat(),
         "commands": {},
     }
+    active_module_paths = discover_active_module_paths()
 
     ruff_result = run_command([
         resolve_local_bin("ruff"),
@@ -239,9 +315,9 @@ def collect_metrics(include_smoke: bool) -> dict[str, Any]:
     metrics["ruff_errors"] = parse_ruff_errors(ruff_result.stdout)
     ruff_active_breakdown = parse_ruff_errors_by_path(
         ruff_result.stdout,
-        ACTIVE_MODULE_PATHS,
+        active_module_paths,
     )
-    metrics["active_modules"] = list(ACTIVE_MODULE_PATHS)
+    metrics["active_modules"] = list(active_module_paths)
     metrics["active_module_ruff_breakdown"] = ruff_active_breakdown
     metrics["active_module_ruff_errors"] = sum(ruff_active_breakdown.values())
 
@@ -259,7 +335,7 @@ def collect_metrics(include_smoke: bool) -> dict[str, Any]:
     metrics["mypy_errors"] = parse_mypy_errors(mypy_combined)
     mypy_active_breakdown = parse_mypy_errors_by_path(
         mypy_combined,
-        ACTIVE_MODULE_PATHS,
+        active_module_paths,
     )
     metrics["active_module_mypy_breakdown"] = mypy_active_breakdown
     metrics["active_module_mypy_errors"] = sum(mypy_active_breakdown.values())
