@@ -2,39 +2,38 @@
 
 from __future__ import annotations
 
-import os
-from collections.abc import AsyncIterator, Callable
+import asyncio
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 
+from alembic.config import Config
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
+from alembic import command
 from financial_news.config import get_settings
 from financial_news.storage.models import Base
 
 
 def _coerce_db_url() -> str:
-    """Build the async SQLAlchemy URL from environment settings."""
-    app_settings = get_settings()
-    raw_url = (
-        os.getenv("DATABASE_URL")
-        or os.getenv("DB_URL")
-        or app_settings.database.url
-    )
-
-    if raw_url.startswith("postgresql+asyncpg://"):
-        return raw_url
-    if raw_url.startswith("postgres://"):
-        return raw_url.replace("postgres://", "postgresql+asyncpg://", 1)
-    if raw_url.startswith("postgresql://"):
-        return raw_url.replace("postgresql://", "postgresql+asyncpg://", 1)
-    if "://" not in raw_url:
-        return f"postgresql+asyncpg://{raw_url}"
-    return raw_url
+    """Build the async SQLAlchemy URL from typed settings."""
+    return get_settings().database.async_url
 
 
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
+_schema_initialized = False
+_schema_lock = asyncio.Lock()
+
+
+def _is_schema_initialized() -> bool:
+    return _schema_initialized
 
 
 def get_engine() -> AsyncEngine:
@@ -43,11 +42,11 @@ def get_engine() -> AsyncEngine:
     if _engine is not None:
         return _engine
 
-    database_url = _coerce_db_url()
+    database = get_settings().database
     _engine = create_async_engine(
-        database_url,
+        database.async_url,
         pool_pre_ping=True,
-        echo=os.getenv("DB_ECHO", "false").lower() in {"1", "true", "on", "yes"},
+        echo=database.echo,
     )
     return _engine
 
@@ -56,8 +55,7 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
     """Create or return cached async session factory."""
     global _session_factory
     if _session_factory is None:
-        engine = get_engine()
-        _session_factory = async_sessionmaker(bind=engine, expire_on_commit=False)
+        _session_factory = async_sessionmaker(bind=get_engine(), expire_on_commit=False)
     return _session_factory
 
 
@@ -74,20 +72,37 @@ async def get_session() -> AsyncIterator[AsyncSession]:
             raise
 
 
+def _run_alembic_upgrade_head() -> None:
+    config = Config(str(Path(__file__).resolve().parents[3] / "alembic.ini"))
+    config.set_main_option("script_location", str(Path(__file__).resolve().parents[3] / "alembic"))
+    command.upgrade(config, "head")
+
+
 async def initialize_schema() -> None:
-    """Create tables if they do not exist."""
-    engine = get_engine()
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    """Ensure the database schema is initialized once for the process."""
+    global _schema_initialized
+    if _is_schema_initialized():
+        return
+
+    async with _schema_lock:
+        if _is_schema_initialized():
+            return
+
+        strategy = get_settings().database.bootstrap_strategy
+        if strategy == "create_all":
+            async with get_engine().begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+        else:
+            await asyncio.to_thread(_run_alembic_upgrade_head)
+        _schema_initialized = True
 
 
-def get_db_health_check() -> Callable[[], AsyncIterator[bool]]:
+def get_db_health_check() -> Callable[[], Awaitable[bool]]:
     """Create a small DB health-check callback."""
 
     async def _check() -> bool:
         try:
-            engine = get_engine()
-            async with engine.connect() as conn:
+            async with get_engine().connect() as conn:
                 await conn.execute(text("SELECT 1"))
             return True
         except Exception:

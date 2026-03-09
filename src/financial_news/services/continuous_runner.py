@@ -24,6 +24,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar, Literal, cast
 
+from financial_news.config import get_settings
 from financial_news.services.connectors.gdelt import GDELTConnector
 from financial_news.services.connectors.newsdata import NewsdataConnector
 from financial_news.services.connectors.reddit import RedditFinanceConnector
@@ -84,6 +85,7 @@ class ContinuousIngestRunner:
     }
 
     def __init__(self, *, session_factory: Any | None = None) -> None:
+        continuous_settings = get_settings().continuous_ingest
         self._session_factory = session_factory or get_session_factory()
         repo_session_factory = cast("Any", self._session_factory)
         self._article_repo = ArticleRepository(session_factory=repo_session_factory)
@@ -102,14 +104,14 @@ class ContinuousIngestRunner:
         self._connector_runtime_overrides: dict[str, bool] = {}
 
         # Configuration
-        self.enabled = _env_bool("CONTINUOUS_INGEST_ENABLED", default=True)
-        self.interval_seconds = _env_int("CONTINUOUS_INGEST_INTERVAL_SECONDS", 300)
+        self.enabled = continuous_settings.enabled
+        self.interval_seconds = max(1, continuous_settings.interval_seconds)
 
         # Backward-compatible flags used in tests and status responses.
-        self.gdelt_enabled = _env_bool("GDELT_ENABLED", default=True)
-        self.sec_edgar_enabled = _env_bool("SEC_EDGAR_ENABLED", default=True)
-        self.newsdata_enabled = _env_bool("NEWSDATA_ENABLED", default=True)
-        self.reddit_enabled = _env_bool("REDDIT_ENABLED", default=False)
+        self.gdelt_enabled = continuous_settings.gdelt_enabled
+        self.sec_edgar_enabled = continuous_settings.sec_edgar_enabled
+        self.newsdata_enabled = continuous_settings.newsdata_enabled
+        self.reddit_enabled = continuous_settings.reddit_enabled
 
         self._configured_connector_enabled: dict[str, bool] = {
             "gdelt": self.gdelt_enabled,
@@ -118,21 +120,13 @@ class ContinuousIngestRunner:
             "reddit": self.reddit_enabled,
         }
 
-        self.stock_correlation_enabled = _env_bool(
-            "STOCK_CORRELATION_ENABLED",
-            default=_env_bool("STOCK_CORRELATOR_ENABLED", default=False),
-        )
+        self.stock_correlation_enabled = continuous_settings.stock_correlation_enabled
         self._stock_correlator_enabled = self.stock_correlation_enabled
         self._stock_correlator = (
             StockCorrelator() if self._stock_correlator_enabled else None
         )
-        self._near_dedup_enabled = _env_bool("FEED_NEAR_DEDUP_ENABLED", default=False)
-        try:
-            configured_threshold = float(
-                os.getenv("FEED_NEAR_DEDUP_SIMILARITY_THRESHOLD", "0.92")
-            )
-        except (TypeError, ValueError):
-            configured_threshold = 0.92
+        self._near_dedup_enabled = continuous_settings.near_dedup_enabled
+        configured_threshold = continuous_settings.near_dedup_similarity_threshold
         self._near_dedup_similarity_threshold = max(
             0.5,
             min(0.99, configured_threshold),
