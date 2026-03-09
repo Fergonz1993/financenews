@@ -8,6 +8,7 @@ for development and production environments.
 import logging
 import logging.config
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -168,13 +169,13 @@ class LoggerMixin:
 
 
 # Performance logging decorator
-def log_performance(func):
+def log_performance[**P, R](func: Callable[P, R]) -> Callable[P, R]:
     """Decorator to log function execution time."""
     import functools
     import time
 
     @functools.wraps(func)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
         logger = logging.getLogger(f"{func.__module__}.{func.__name__}")
         start_time = time.time()
 

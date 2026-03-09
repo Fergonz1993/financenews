@@ -51,6 +51,7 @@ dependencies = [
     "numpy>=2.0.2",
     "matplotlib>=3.9.4",
     "seaborn>=0.13.2",
+    "pydantic-settings>=2.13.1",
     "SQLAlchemy>=2.0.40",
     "asyncpg>=0.30.0",
     "alembic>=1.13.0",
@@ -61,8 +62,10 @@ dependencies = [
     # Utilities
     "tqdm>=4.67.3",
     "colorlog>=6.10.1",
+    "fastapi>=0.128.8",
     "httpx>=0.28.1",
     "greenlet>=3.3.2",
+    "uvicorn>=0.39.0",
 ]
 
 [project.optional-dependencies]
@@ -84,8 +87,6 @@ multimedia = [
 ]
 web = [
     "streamlit>=1.50.0",
-    "fastapi>=0.128.8",
-    "uvicorn>=0.39.0",
 ]
 realtime = [
     "websockets>=11.0.0",
@@ -199,6 +200,9 @@ exclude = [
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
 "tests/**/*" = ["ARG001", "S101"]
+"src/financial_news/api/*.py" = ["TCH"]
+"src/financial_news/api/routes/*.py" = ["TCH"]
+"src/financial_news/storage/db.py" = ["TCH"]
 
 # MyPy configuration
 [tool.mypy]
@@ -221,6 +225,8 @@ module = [
     "feedparser.*",
     "finnhub.*",
     "textblob.*",
+    "nltk",
+    "nltk.*",
     "fuzzywuzzy.*",
     "colorlog.*",
     "asyncio_throttle.*",

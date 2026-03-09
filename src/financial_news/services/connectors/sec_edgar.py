@@ -109,9 +109,9 @@ class SECEdgarConnector(BaseConnector):
     async def fetch_articles(
         self,
         source_id: int | None = None,
-    ) -> list[dict[str, Any]]:
-        """Return normalized article dicts from SEC EDGAR full-text search."""
-        all_articles: list[dict[str, Any]] = []
+    ) -> list[ParsedArticle]:
+        """Return normalized article models from SEC EDGAR full-text search."""
+        all_articles: list[ParsedArticle] = []
         seen_urls: set[str] = set()
 
         headers = {
@@ -152,7 +152,7 @@ class SECEdgarConnector(BaseConnector):
         session: aiohttp.ClientSession,
         query: str,
         source_id: int | None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[ParsedArticle]:
         """Use EDGAR full-text search API."""
         params = {
             "q": query,
@@ -173,7 +173,7 @@ class SECEdgarConnector(BaseConnector):
             return await self._fetch_press_rss(session, source_id)
 
         hits = data.get("hits", {}).get("hits", [])
-        results: list[dict[str, Any]] = []
+        results: list[ParsedArticle] = []
 
         for hit in hits[: self.max_articles]:
             src = hit.get("_source", {})
@@ -199,26 +199,25 @@ class SECEdgarConnector(BaseConnector):
             content = f"{form_type} filing: {title}"
             sentiment = analyze_article_sentiment(content)
 
-            record = {
-                "id": _hash(f"sec|{accession}|{title}"),
-                "source": "SEC EDGAR",
-                "source_name": "SEC EDGAR",
-                "source_id": source_id,
-                "source_item_id": _hash(accession or url),
-                "published_at": published_at,
-                "title": f"[{form_type}] {title}" if form_type else title,
-                "url": url,
-                "content": content,
-                "summarized_headline": f"Summary: {title[:90]}",
-                "summary_bullets": [content[:120]],
-                "sentiment": sentiment.get("sentiment"),
-                "sentiment_score": sentiment.get("sentiment_score"),
-                "market_impact_score": min(
+            record = ParsedArticle(
+                id=_hash(f"sec|{accession}|{title}"),
+                source_name="SEC EDGAR",
+                source_id=source_id,
+                source_item_id=_hash(accession or url),
+                published_at=published_at,
+                title=f"[{form_type}] {title}" if form_type else title,
+                url=url,
+                content=content,
+                summarized_headline=f"Summary: {title[:90]}",
+                summary_bullets=[content[:120]],
+                sentiment=sentiment.get("sentiment"),
+                sentiment_score=sentiment.get("sentiment_score"),
+                market_impact_score=min(
                     1.0, abs((sentiment.get("sentiment_score") or 0.5) - 0.5) * 2
                 ),
-                "key_entities": _extract_entities(title),
-                "topics": _extract_topics(content),
-            }
+                key_entities=_extract_entities(title),
+                topics=_extract_topics(content),
+            )
             results.append(record)
 
         return results
@@ -227,7 +226,7 @@ class SECEdgarConnector(BaseConnector):
         self,
         session: aiohttp.ClientSession,
         source_id: int | None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[ParsedArticle]:
         """Fallback: parse SEC press releases RSS."""
         import feedparser
 
@@ -245,7 +244,7 @@ class SECEdgarConnector(BaseConnector):
             return []
 
         feed = feedparser.parse(text)
-        results: list[dict[str, Any]] = []
+        results: list[ParsedArticle] = []
 
         for entry in feed.entries[: self.max_articles]:
             title = _clean_text(entry.get("title", ""))
@@ -265,27 +264,26 @@ class SECEdgarConnector(BaseConnector):
 
             sentiment = analyze_article_sentiment(f"{title} {content}")
 
-            record = {
-                "id": _hash(f"sec-press|{link}"),
-                "source": "SEC Press Releases",
-                "source_name": "SEC Press Releases",
-                "source_id": source_id,
-                "source_item_id": _hash(link),
-                "published_at": published_at,
-                "title": title,
-                "url": link,
-                "content": content,
-                "summarized_headline": f"Summary: {title[:90]}",
-                "summary_bullets": [content[:120]] if content else [],
-                "sentiment": sentiment.get("sentiment"),
-                "sentiment_score": sentiment.get("sentiment_score"),
-                "market_impact_score": min(
+            record = ParsedArticle(
+                id=_hash(f"sec-press|{link}"),
+                source_name="SEC Press Releases",
+                source_id=source_id,
+                source_item_id=_hash(link),
+                published_at=published_at,
+                title=title,
+                url=link,
+                content=content,
+                summarized_headline=f"Summary: {title[:90]}",
+                summary_bullets=[content[:120]] if content else [],
+                sentiment=sentiment.get("sentiment"),
+                sentiment_score=sentiment.get("sentiment_score"),
+                market_impact_score=min(
                     1.0,
                     abs((sentiment.get("sentiment_score") or 0.5) - 0.5) * 2,
                 ),
-                "key_entities": _extract_entities(title),
-                "topics": _extract_topics(f"{title} {content}"),
-            }
+                key_entities=_extract_entities(title),
+                topics=_extract_topics(f"{title} {content}"),
+            )
             results.append(record)
 
         return results

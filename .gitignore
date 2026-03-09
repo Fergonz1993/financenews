@@ -102,7 +102,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
 sdist/
@@ -329,8 +328,7 @@ briefings/
 *.tmp
 temp/
 cache/
-data/
-models/
+/data/
 checkpoints/
 
 # API keys and secrets

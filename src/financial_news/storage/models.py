@@ -2,17 +2,25 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
-from sqlalchemy import Index
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _default_list() -> list[str]:
@@ -53,8 +61,14 @@ class Source(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     crawl_interval_minutes: Mapped[int] = mapped_column(Integer, default=30)
     rate_limit_per_minute: Mapped[int] = mapped_column(Integer, default=60)
-    retry_policy_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=_default_dict)
-    parser_contract_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=_default_dict)
+    retry_policy_json: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        default=_default_dict,
+    )
+    parser_contract_json: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        default=_default_dict,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=None, default=_utcnow
     )
@@ -62,12 +76,12 @@ class Source(Base):
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
 
-    articles: Mapped[list["Article"]] = relationship(
+    articles: Mapped[list[Article]] = relationship(
         back_populates="source",
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
-    states: Mapped[list["IngestionState"]] = relationship(
+    states: Mapped[list[IngestionState]] = relationship(
         back_populates="source",
         cascade="all, delete-orphan",
         passive_deletes=True,
