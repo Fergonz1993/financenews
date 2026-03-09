@@ -37,7 +37,7 @@ python-crontab==3.0.0
 httpx==0.28.1
 SQLAlchemy==2.0.40
 asyncpg==0.30.0
-alembic==1.13.0
+alembic==1.18.4
 
 # Optional for advanced features
 streamlit==1.50.0
