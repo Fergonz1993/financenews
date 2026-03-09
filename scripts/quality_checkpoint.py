@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shlex
 import statistics
@@ -24,12 +25,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-ACTIVE_MODULE_PATHS = (
+LEGACY_ACTIVE_MODULE_PATHS = (
     "src/financial_news/api/main.py",
     "src/financial_news/services/news_ingest.py",
     "src/financial_news/services/continuous_runner.py",
     "src/financial_news/storage/repositories.py",
 )
+ACTIVE_MODULE_DISCOVERY_PREFIXES = ("src/", "tests/")
 
 
 @dataclass
@@ -69,6 +71,104 @@ def resolve_local_bin(executable: str) -> str:
     if local.exists() and local.is_file():
         return str(local)
     return executable
+
+
+def _command_diagnostics(result: CommandResult, *, max_chars: int = 4000) -> dict[str, str]:
+    if result.return_code == 0:
+        return {}
+
+    diagnostics: dict[str, str] = {}
+    if result.stdout.strip():
+        diagnostics["stdout_tail"] = result.stdout[-max_chars:]
+    if result.stderr.strip():
+        diagnostics["stderr_tail"] = result.stderr[-max_chars:]
+    return diagnostics
+
+
+def _normalize_repo_path(path: str) -> str:
+    return path.strip().replace("\\", "/")
+
+
+def _is_relevant_active_module(path: str) -> bool:
+    normalized = _normalize_repo_path(path)
+    return (
+        bool(normalized)
+        and normalized.endswith(".py")
+        and any(
+            normalized.startswith(prefix)
+            for prefix in ACTIVE_MODULE_DISCOVERY_PREFIXES
+        )
+        and Path(normalized).exists()
+    )
+
+
+def _dedupe_paths(paths: list[str]) -> tuple[str, ...]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for path in paths:
+        normalized = _normalize_repo_path(path)
+        if normalized and normalized not in seen:
+            deduped.append(normalized)
+            seen.add(normalized)
+    return tuple(deduped)
+
+
+def _git_stdout_lines(command: list[str]) -> list[str]:
+    result = run_command(command)
+    if result.return_code != 0:
+        return []
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def _git_command_succeeds(command: list[str]) -> bool:
+    return run_command(command).return_code == 0
+
+
+def _git_has_head_parent() -> bool:
+    return _git_command_succeeds(["git", "rev-parse", "--verify", "HEAD^"])
+
+
+def discover_active_module_paths() -> tuple[str, ...]:
+    discovered_paths: list[str] = []
+    quality_base_ref = os.getenv("QUALITY_BASE_REF")
+    quality_head_ref = os.getenv("QUALITY_HEAD_REF", "HEAD")
+
+    if quality_base_ref:
+        discovered_paths.extend(
+            _git_stdout_lines(
+                [
+                    "git",
+                    "diff",
+                    "--name-only",
+                    "--diff-filter=ACMRTUXB",
+                    quality_base_ref,
+                    quality_head_ref,
+                ]
+            )
+        )
+
+    discovered_paths.extend(
+        _git_stdout_lines(["git", "diff", "--name-only", "--diff-filter=ACMRTUXB", "HEAD"])
+    )
+    if _git_has_head_parent():
+        discovered_paths.extend(
+            _git_stdout_lines(
+                ["git", "diff", "--name-only", "--diff-filter=ACMRTUXB", "HEAD^", "HEAD"]
+            )
+        )
+    discovered_paths.extend(
+        _git_stdout_lines(["git", "ls-files", "--others", "--exclude-standard"])
+    )
+
+    relevant_paths = [
+        path
+        for path in discovered_paths
+        if _is_relevant_active_module(path)
+    ]
+    active_module_paths = _dedupe_paths(relevant_paths)
+    if active_module_paths:
+        return active_module_paths
+    return LEGACY_ACTIVE_MODULE_PATHS
 
 
 def parse_ruff_errors(output: str) -> int:
@@ -222,6 +322,7 @@ def collect_metrics(include_smoke: bool) -> dict[str, Any]:
         "generated_at": datetime.now(UTC).isoformat(),
         "commands": {},
     }
+    active_module_paths = discover_active_module_paths()
 
     ruff_result = run_command([
         resolve_local_bin("ruff"),
@@ -235,13 +336,14 @@ def collect_metrics(include_smoke: bool) -> dict[str, Any]:
     metrics["commands"]["ruff"] = {
         "command": ruff_result.command,
         "return_code": ruff_result.return_code,
+        **_command_diagnostics(ruff_result),
     }
     metrics["ruff_errors"] = parse_ruff_errors(ruff_result.stdout)
     ruff_active_breakdown = parse_ruff_errors_by_path(
         ruff_result.stdout,
-        ACTIVE_MODULE_PATHS,
+        active_module_paths,
     )
-    metrics["active_modules"] = list(ACTIVE_MODULE_PATHS)
+    metrics["active_modules"] = list(active_module_paths)
     metrics["active_module_ruff_breakdown"] = ruff_active_breakdown
     metrics["active_module_ruff_errors"] = sum(ruff_active_breakdown.values())
 
@@ -254,12 +356,13 @@ def collect_metrics(include_smoke: bool) -> dict[str, Any]:
     metrics["commands"]["mypy"] = {
         "command": mypy_result.command,
         "return_code": mypy_result.return_code,
+        **_command_diagnostics(mypy_result),
     }
     mypy_combined = mypy_result.stdout + "\n" + mypy_result.stderr
     metrics["mypy_errors"] = parse_mypy_errors(mypy_combined)
     mypy_active_breakdown = parse_mypy_errors_by_path(
         mypy_combined,
-        ACTIVE_MODULE_PATHS,
+        active_module_paths,
     )
     metrics["active_module_mypy_breakdown"] = mypy_active_breakdown
     metrics["active_module_mypy_errors"] = sum(mypy_active_breakdown.values())
@@ -274,6 +377,7 @@ def collect_metrics(include_smoke: bool) -> dict[str, Any]:
     metrics["commands"]["pytest_unit_coverage"] = {
         "command": pytest_result.command,
         "return_code": pytest_result.return_code,
+        **_command_diagnostics(pytest_result),
     }
     metrics["unit_tests_passed"] = pytest_result.return_code == 0
     metrics["coverage_unit_pct"] = parse_pytest_coverage_pct(pytest_result.stdout)
@@ -282,6 +386,7 @@ def collect_metrics(include_smoke: bool) -> dict[str, Any]:
     metrics["commands"]["tsc"] = {
         "command": tsc_result.command,
         "return_code": tsc_result.return_code,
+        **_command_diagnostics(tsc_result),
     }
     metrics["tsc_passed"] = tsc_result.return_code == 0
 
@@ -289,6 +394,7 @@ def collect_metrics(include_smoke: bool) -> dict[str, Any]:
     metrics["commands"]["eslint"] = {
         "command": eslint_result.command,
         "return_code": eslint_result.return_code,
+        **_command_diagnostics(eslint_result),
     }
     metrics["eslint_passed"] = eslint_result.return_code == 0
     metrics["eslint_warnings"] = parse_eslint_warnings(eslint_result.stdout + "\n" + eslint_result.stderr)
@@ -299,6 +405,7 @@ def collect_metrics(include_smoke: bool) -> dict[str, Any]:
         metrics["commands"]["smoke_frontend"] = {
             "command": smoke_result.command,
             "return_code": smoke_result.return_code,
+            **_command_diagnostics(smoke_result),
         }
         smoke_passed = smoke_result.return_code == 0
     metrics["smoke_frontend_passed"] = smoke_passed
@@ -364,6 +471,30 @@ def render_markdown(metrics: dict[str, Any]) -> str:
     commands = metrics.get("commands", {})
     for name, payload in commands.items():
         lines.append(f"- `{name}`: `{payload.get('command')}` (rc={payload.get('return_code')})")
+        stdout_tail = payload.get("stdout_tail")
+        stderr_tail = payload.get("stderr_tail")
+        if stdout_tail:
+            lines.extend(
+                [
+                    "",
+                    f"  stdout tail for `{name}`:",
+                    "",
+                    "  ```text",
+                    *(f"  {line}" for line in str(stdout_tail).splitlines()),
+                    "  ```",
+                ]
+            )
+        if stderr_tail:
+            lines.extend(
+                [
+                    "",
+                    f"  stderr tail for `{name}`:",
+                    "",
+                    "  ```text",
+                    *(f"  {line}" for line in str(stderr_tail).splitlines()),
+                    "  ```",
+                ]
+            )
 
     return "\n".join(lines) + "\n"
 
@@ -460,6 +591,15 @@ def ratchet_against_baseline(
     for key, label in required_bools.items():
         if baseline.get(f"require_{key}", True) and not bool(current.get(key)):
             failures.append(f"{label} failed")
+            command_name = "pytest_unit_coverage" if key == "unit_tests_passed" else None
+            if command_name:
+                command_payload = current.get("commands", {}).get(command_name, {})
+                stdout_tail = command_payload.get("stdout_tail")
+                stderr_tail = command_payload.get("stderr_tail")
+                if stdout_tail:
+                    failures.append(f"{label} stdout tail:\n{stdout_tail}")
+                if stderr_tail:
+                    failures.append(f"{label} stderr tail:\n{stderr_tail}")
 
     if baseline.get("require_smoke_frontend", False) and not bool(
         current.get("smoke_frontend_passed")

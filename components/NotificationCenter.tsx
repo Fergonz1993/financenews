@@ -102,6 +102,7 @@ const NotificationCenter = (): React.JSX.Element => {
   const reconnectAttemptRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
+  const connectRef = useRef<() => void>(() => { });
 
   const unreadCount = useMemo(
     () => notifications.reduce((count, notification) => count + (notification.read ? 0 : 1), 0),
@@ -159,7 +160,7 @@ const NotificationCenter = (): React.JSX.Element => {
     reconnectAttemptRef.current += 1;
     clearReconnectTimer();
     reconnectTimerRef.current = setTimeout(() => {
-      void connect();
+      connectRef.current();
     }, backoff);
   }, [clearReconnectTimer]);
 
@@ -233,7 +234,7 @@ const NotificationCenter = (): React.JSX.Element => {
             title,
             message,
             source,
-            severity: 'info',
+            severity: 'info' as const,
             url,
           },
           ...current,
@@ -290,20 +291,29 @@ const NotificationCenter = (): React.JSX.Element => {
     });
   }, [handleIncoming, notifyError, notifyInfo, notifySuccess, resolveWsUrl, scheduleReconnect]);
 
+  // Keep ref in sync so scheduleReconnect can call the latest version.
+  useEffect(() => {
+    connectRef.current = connect;
+  }, [connect]);
+
   const handleOpen = useCallback(() => {
     setIsOpen(true);
   }, []);
 
   useEffect(() => {
     mountedRef.current = true;
-    connect();
+    // Defer to next tick to avoid synchronous setState within effect body.
+    const timer = setTimeout(() => {
+      if (mountedRef.current) {
+        connect();
+      }
+    }, 0);
 
     return () => {
       mountedRef.current = false;
+      clearTimeout(timer);
       clearReconnectTimer();
       closeSocket();
-      setIsConnected(false);
-      setIsReconnecting(false);
     };
   }, [clearReconnectTimer, closeSocket, connect]);
 

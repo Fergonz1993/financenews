@@ -17,9 +17,16 @@ from financial_news.storage.models import (
     IngestionRun,
     IngestionState,
     Source,
+    UserAlertPreferences,
     UserSavedArticle,
     UserSettings,
-    UserAlertPreferences,
+)
+from financial_news.utils import (
+    canonicalize_url,
+    coerce_datetime_utc,
+    coerce_string_list,
+    normalize_search_text,
+    slugify_value,
 )
 
 if TYPE_CHECKING:
@@ -29,16 +36,11 @@ if TYPE_CHECKING:
 
 
 def _slugify(value: Any) -> str:
-    normalized = re.sub(r"[^a-z0-9]+", "-", str(value or "").strip().lower())
-    return normalized.strip("-")
+    return slugify_value(value)
 
 
 def _coerce_list(value: Any, *, max_items: int = 20) -> list[str]:
-    if not value:
-        return []
-    if isinstance(value, list):
-        return [str(item) for item in value if item][:max_items]
-    return [str(value)]
+    return coerce_string_list(value, max_items=max_items)
 
 
 def _normalize_title_value(value: Any) -> str:
@@ -56,37 +58,11 @@ def _safe_float(value: Any) -> float | None:
 
 
 def _coerce_datetime(value: Any) -> datetime:
-    if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=UTC)
-    if not value:
-        return datetime.now(UTC)
-    if isinstance(value, str):
-        try:
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-            return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
-        except ValueError:
-            return datetime.now(UTC)
-    return datetime.now(UTC)
+    return coerce_datetime_utc(value, default=datetime.now(UTC))
 
 
 def _canonicalize_url(value: str) -> str:
-    normalized = (value or "").strip().lower()
-    if not normalized:
-        return ""
-    if "://" not in normalized:
-        return normalized
-
-    if "#" in normalized:
-        normalized = normalized.split("#", 1)[0]
-    for prefix in ("utm_source=", "utm_medium=", "utm_campaign=", "utm_term="):
-        if prefix in normalized:
-            base, _sep, tail = normalized.partition("?")
-            if tail:
-                params = [p for p in tail.split("&") if not p.lower().startswith(prefix)]
-                normalized = base if not params else base + "?" + "&".join(params)
-            break
-
-    return normalized.rstrip("/")
+    return canonicalize_url(value)
 
 
 def _hash_value(value: str) -> str:
@@ -102,10 +78,7 @@ def _coerce_opt_str(value: Any) -> str | None:
 
 
 def _normalize_search_text(value: Any) -> str:
-    if not value:
-        return ""
-    normalized = str(value).lower()
-    return re.sub(r"[^a-z0-9]+", " ", normalized).strip()
+    return normalize_search_text(value)
 
 
 def _collect_aliases(search: str) -> list[str]:
@@ -667,9 +640,10 @@ class ArticleRepository:
             if canonical_url
             else f"{source_key}|{title}|{published_at.isoformat()}"
         )
-        dedupe_key = _hash_value(
-            f"{source_key}|{title.lower()}|{published_at.isoformat()}"
-        )
+        # dedupe_key: drop source_key and use YYYY-MM-DD to deduplicate identical titles across sources
+        # on the same day, significantly improving ranking/dedup quality.
+        day_str = published_at.strftime("%Y-%m-%d") if published_at else "1970-01-01"
+        dedupe_key = _hash_value(f"{title.lower()}|{day_str}")
         article_id = item.get("id")
         if not article_id:
             article_id = _hash_value(

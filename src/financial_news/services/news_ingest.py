@@ -22,11 +22,11 @@ from uuid import uuid4
 import aiohttp
 import feedparser
 
+from financial_news.core.schemas import ParsedArticle
 from financial_news.core.sentiment import (
     analyze_article_sentiment,
     get_sentiment_analyzer,
 )
-from financial_news.core.summarizer import Article
 from financial_news.storage import (
     ArticleRepository,
     IngestionRunRepository,
@@ -35,6 +35,12 @@ from financial_news.storage import (
     SourceRepository,
     get_session_factory,
     initialize_schema,
+)
+from financial_news.utils import (
+    canonicalize_url,
+    coerce_datetime_utc,
+    coerce_string_list,
+    slugify_value,
 )
 
 if TYPE_CHECKING:
@@ -228,39 +234,15 @@ def _parse_bool(value: Any, default: bool = False) -> bool:
 
 
 def _slugify_filter(value: str) -> str:
-    return _FILTER_RE.sub("-", str(value).strip().lower()).strip("-")
+    return slugify_value(value)
 
 
 def _canonicalize_url(value: str) -> str:
-    if not value:
-        return ""
-    parsed = urlparse(value)
-    query_pairs = [(k, v) for k, v in parse_qsl(parsed.query, keep_blank_values=True)]
-    cleaned_query = "&".join(
-        [
-            f"{name}={value}"
-            for name, value in query_pairs
-            if not name.lower().startswith(("utm_", "ref_", "source", "session"))
-            and not name.lower().endswith("clid")
-        ]
-    )
-    rebuilt = parsed._replace(query=cleaned_query, fragment="")
-    canonical = urlunparse(rebuilt).rstrip("/")
-    return canonical
+    return canonicalize_url(value)
 
 
 def _coerce_datetime(value: Any) -> datetime:
-    if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=UTC)
-    if not value:
-        return datetime.now(UTC)
-    if isinstance(value, str):
-        try:
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-            return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
-        except ValueError:
-            return datetime.now(UTC)
-    return datetime.now(UTC)
+    return coerce_datetime_utc(value, default=datetime.now(UTC))
 
 
 def _parse_published_time(entry: Any) -> datetime:
@@ -325,12 +307,7 @@ def _coerce_float(value: Any) -> float | None:
 
 
 def _coerce_list(value: Any, *, max_items: int = 20) -> list[str]:
-    if not value:
-        return []
-    if isinstance(value, list):
-        values = [str(item).strip() for item in value if str(item).strip()]
-        return values[:max_items]
-    return [str(value).strip()] if str(value).strip() else []
+    return coerce_string_list(value, max_items=max_items)
 
 
 def _to_text(value: Any) -> str:
@@ -935,12 +912,13 @@ class NewsIngestor:
                 timeout=aiohttp.ClientTimeout(total=self._request_timeout_seconds),
                 headers=headers,
             ) as session:
-                parsed_items, etag = await self._fetch_and_parse_source(
+                parsed_items_models, etag = await self._fetch_and_parse_source(
                     session=session,
                     source=source,
                     state=state,
                     parser_contract=parser_contract,
                 )
+                parsed_items = [p.as_db_dict() for p in parsed_items_models]
                 result.items_seen = len(parsed_items)
                 result.latest_cursor = None
                 if parsed_items:
@@ -1011,7 +989,7 @@ class NewsIngestor:
         source: Any,
         state: Any,
         parser_contract: dict[str, Any],
-    ) -> tuple[list[dict[str, Any]], str | None]:
+    ) -> tuple[list[ParsedArticle], str | None]:
         supports_since = bool(parser_contract.get("supports_since", False))
         since_param = parser_contract.get("since_param") or "from"
         source_url = source.url
@@ -1031,7 +1009,7 @@ class NewsIngestor:
         )
 
         cursor_dt = _coerce_datetime(cursor_value) if cursor_value else None
-        parsed_items: list[dict[str, Any]] = []
+        parsed_items: list[ParsedArticle] = []
         parser_failures = 0
         for entry in feed_entries:
             try:
@@ -1049,8 +1027,8 @@ class NewsIngestor:
                 published = _parse_published_time(entry)
                 if cursor_dt and published <= cursor_dt:
                     continue
-                parsed["published_at"] = published
-                parsed["source_id"] = source.id
+                parsed.published_at = published
+                parsed.source_id = source.id
                 parsed_items.append(parsed)
                 if len(parsed_items) >= self._max_items_per_source:
                     break
@@ -1264,7 +1242,7 @@ async def _entry_to_record(
     fetch_full_text: bool = False,
     min_full_text_chars: int = DEFAULT_MIN_ENTRY_CONTENT_CHARS,
     max_full_text_chars: int = DEFAULT_MAX_FULL_TEXT_CHARS,
-) -> dict[str, Any] | None:
+) -> ParsedArticle | None:
     if not isinstance(entry, dict):
         return None
 
@@ -1302,45 +1280,38 @@ async def _entry_to_record(
     if not content:
         content = title
 
-    article = Article(
-        title=title,
-        url=_canonicalize_url(link),
-        source=source,
-        published_at=published_at.isoformat(),
-        content=content,
-    )
-    article.source_item_id = str(entry.get("id") or entry.get("guid") or link)
-    article.summarized_headline = f"Summary: {title[:90]}" if title else None
-    article.summary_bullets = [s.strip() for s in _bullets_from_text(content) if s.strip()][:3]
-    sentiment = analyze_article_sentiment(f"{title} {content}")
-    article.sentiment = sentiment.get("sentiment")
-    article.sentiment_score = sentiment.get("sentiment_score")
-    article.market_impact_score = min(
+    canonical_url = _canonicalize_url(link)
+    source_item_id = str(entry.get("id") or entry.get("guid") or link)
+    summarized_headline = f"Summary: {title[:90]}" if title else None
+    summary_bullets = [s.strip() for s in _bullets_from_text(content) if s.strip()][:3]
+    sentiment_dict = analyze_article_sentiment(f"{title} {content}")
+    sentiment = sentiment_dict.get("sentiment")
+    sentiment_score = sentiment_dict.get("sentiment_score")
+    market_impact_score = min(
         1.0,
-        abs((article.sentiment_score or 0.5) - 0.5) * 2,
+        abs((sentiment_score or 0.5) - 0.5) * 2,
     )
-    article.key_entities = _extract_entities(f"{title} {content}")
-    article.topics = _extract_topics(f"{title} {content}")
-    article.processed_at = datetime.now(UTC)
+    key_entities = _extract_entities(f"{title} {content}")
+    topics = _extract_topics(f"{title} {content}")
 
-    return {
-        "id": article.id,
-        "source": source,
-        "source_name": source,
-        "source_id": source_id,
-        "source_item_id": article.source_item_id,
-        "published_at": published_at,
-        "title": article.title,
-        "url": article.url,
-        "content": article.content,
-        "summarized_headline": article.summarized_headline,
-        "summary_bullets": article.summary_bullets,
-        "sentiment": article.sentiment,
-        "sentiment_score": article.sentiment_score,
-        "market_impact_score": article.market_impact_score,
-        "key_entities": article.key_entities,
-        "topics": article.topics,
-    }
+    return ParsedArticle(
+        id=_hash_value(f"rss|{canonical_url}|{title}"),
+        source_name=source,
+        source_id=source_id,
+        source_item_id=_hash_value(source_item_id),
+        title=title,
+        url=canonical_url,
+        content=content,
+        published_at=published_at,
+        summarized_headline=summarized_headline,
+        summary_bullets=summary_bullets,
+        sentiment=sentiment,
+        sentiment_score=sentiment_score,
+        market_impact_score=market_impact_score,
+        key_entities=key_entities,
+        topics=topics,
+        relevance_precision=None,
+    )
 
 
 async def _fetch_feed(

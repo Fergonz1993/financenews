@@ -254,9 +254,9 @@ class RedditFinanceConnector(BaseConnector):
     async def fetch_articles(
         self,
         source_id: int | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[ParsedArticle]:
         """Fetch posts from financial subreddits via RSS."""
-        all_articles: list[dict[str, Any]] = []
+        all_articles: list[ParsedArticle] = []
         seen_urls: set[str] = set()
 
         headers = {
@@ -280,7 +280,7 @@ class RedditFinanceConnector(BaseConnector):
                         session, subreddit, source_id
                     )
                     for article in articles:
-                        url = article.get("url", "")
+                        url = article.url
                         if url in seen_urls:
                             continue
                         seen_urls.add(url)
@@ -300,7 +300,7 @@ class RedditFinanceConnector(BaseConnector):
         session: aiohttp.ClientSession,
         subreddit: str,
         source_id: int | None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[ParsedArticle]:
         """Fetch and parse a single subreddit RSS feed."""
         url = f"https://www.reddit.com/r/{subreddit}/{self.sort}.rss"
 
@@ -313,7 +313,7 @@ class RedditFinanceConnector(BaseConnector):
             text = await resp.text()
 
         feed = feedparser.parse(text)
-        results: list[dict[str, Any]] = []
+        results: list[ParsedArticle] = []
 
         for entry in feed.entries:
             title = _clean_text(entry.get("title", ""))
@@ -351,28 +351,27 @@ class RedditFinanceConnector(BaseConnector):
             if _is_spammy_post(title, content, precision):
                 continue
 
-            record = {
-                "id": _hash(f"reddit|{link}"),
-                "source": f"Reddit - r/{subreddit}",
-                "source_name": f"Reddit - r/{subreddit}",
-                "source_id": source_id,
-                "source_item_id": _hash(link),
-                "published_at": published_at,
-                "title": f"[r/{subreddit}] {title}",
-                "url": link,
-                "content": content[:5000],
-                "summarized_headline": f"Summary: {title[:90]}",
-                "summary_bullets": [title[:120]] if title else [],
-                "sentiment": sentiment.get("sentiment"),
-                "sentiment_score": sentiment.get("sentiment_score"),
-                "market_impact_score": min(
+            record = ParsedArticle(
+                id=_hash(f"reddit|{link}"),
+                source_name=f"Reddit - r/{subreddit}",
+                source_id=source_id,
+                source_item_id=_hash(link),
+                published_at=published_at,
+                title=f"[r/{subreddit}] {title}",
+                url=link,
+                content=content[:5000],
+                summarized_headline=f"Summary: {title[:90]}",
+                summary_bullets=[title[:120]] if title else [],
+                sentiment=sentiment.get("sentiment"),
+                sentiment_score=sentiment.get("sentiment_score"),
+                market_impact_score=min(
                     1.0,
                     abs((sentiment.get("sentiment_score") or 0.5) - 0.5) * 2,
                 ),
-                "key_entities": tickers or _extract_tickers(title),
-                "topics": _extract_topics(f"{title} {content}", subreddit),
-                "relevance_precision": round(precision, 3),
-            }
+                key_entities=tickers or _extract_tickers(title),
+                topics=_extract_topics(f"{title} {content}", subreddit),
+                relevance_precision=round(precision, 3),
+            )
             results.append(record)
 
         return results
