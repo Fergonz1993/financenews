@@ -225,6 +225,8 @@ module = [
     "feedparser.*",
     "finnhub.*",
     "textblob.*",
+    "nltk",
+    "nltk.*",
     "fuzzywuzzy.*",
     "colorlog.*",
     "asyncio_throttle.*",
