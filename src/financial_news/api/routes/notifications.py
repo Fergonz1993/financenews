@@ -14,15 +14,14 @@ from fastapi import (
     WebSocketDisconnect,
 )
 
-from financial_news.api.dependencies import require_admin_access
+from financial_news.api.dependencies import (
+    get_logger,
+    get_notification_manager,
+    require_admin_access,
+)
+from financial_news.api.helpers import _request_id_from_request, _with_request_id
 
 router = APIRouter()
-
-
-def _api() -> Any:
-    from financial_news.api import main as api_main
-
-    return api_main
 
 
 async def _notification_socket_loop(
@@ -30,13 +29,13 @@ async def _notification_socket_loop(
     connection_id: str,
     user_id: str | None,
 ) -> None:
-    api_main = _api()
-    await api_main.notification_manager.connect(websocket, connection_id, user_id)
+    notification_manager = cast(Any, websocket.app.state.container.notification_manager)
+    await notification_manager.connect(websocket, connection_id, user_id)
     try:
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
-        api_main.notification_manager.disconnect(connection_id, user_id)
+        notification_manager.disconnect(connection_id, user_id)
 
 
 @router.websocket("/ws/notifications")
@@ -64,10 +63,11 @@ async def send_notification(
     data: dict[str, Any],
     request: Request,
     admin_actor: str = Depends(require_admin_access("admin", "ops")),
+    notification_manager: Any = Depends(get_notification_manager),
+    logger: Any = Depends(get_logger),
 ) -> dict[str, Any]:
-    api_main = _api()
-    request_id = api_main._request_id_from_request(request)
-    api_main.logger.info(
+    request_id = _request_id_from_request(request)
+    logger.info(
         "admin_send_notification request_id=%s actor=%s notification_type=%s",
         request_id,
         admin_actor,
@@ -76,12 +76,12 @@ async def send_notification(
     if "type" not in data:
         raise HTTPException(status_code=400, detail="Notification type is required")
     if data["type"] == "market_alert" and "alert" in data:
-        await api_main.notification_manager.broadcast_market_alert(
+        await notification_manager.broadcast_market_alert(
             data["alert"],
             request_id=request_id,
         )
     elif data["type"] == "news_update" and "news" in data:
-        await api_main.notification_manager.broadcast_news_update(
+        await notification_manager.broadcast_news_update(
             data["news"],
             request_id=request_id,
         )
@@ -93,7 +93,7 @@ async def send_notification(
         message_payload = data["message"]
         if not isinstance(message_payload, dict):
             message_payload = {"message": str(message_payload)}
-        await api_main.notification_manager.send_to_user(
+        await notification_manager.send_to_user(
             message_payload,
             data["user_id"],
             event_type="user_notification",
@@ -101,10 +101,7 @@ async def send_notification(
         )
     else:
         raise HTTPException(status_code=400, detail="Invalid notification format")
-    return cast(
-        dict[str, Any],
-        api_main._with_request_id(
-            {"status": "success", "message": "Notification sent"},
-            request_id=request_id,
-        ),
+    return _with_request_id(
+        {"status": "success", "message": "Notification sent"},
+        request_id=request_id,
     )

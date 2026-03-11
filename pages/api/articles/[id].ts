@@ -1,5 +1,6 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import {
+  applyProxyResponseHeaders,
   enforceMethod,
   fastApiRequest,
   isBackendUnavailableError,
@@ -43,6 +44,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       query: userId ? { user_id: userId } : undefined,
       req,
     });
+    applyProxyResponseHeaders(res, req);
     res.status(200).json(article);
   } catch (error) {
     if (isLocalApiFallbackEnabled() && isBackendUnavailableError(error)) {
@@ -59,7 +61,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           limit: Math.max(1, toInt(req.query.limit, 10)),
           offset: Math.max(0, toInt(req.query.offset, 0)),
         });
-        res.setHeader('X-Data-Source', 'local-fallback');
+        applyProxyResponseHeaders(res, req, 'fallback_read_only');
         res.status(200).json({ total: fallback.total });
         return;
       }
@@ -71,13 +73,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
       const userId = asSingle(req.query.user_id);
       const saved = userId ? isArticleSavedLocally(userId, articleId) : false;
-      res.setHeader('X-Data-Source', 'local-fallback');
+      applyProxyResponseHeaders(res, req, 'fallback_read_only');
       res.status(200).json({
         ...localArticle,
         is_saved: saved,
       });
       return;
     }
-    sendProxyError(res, error, 'Failed to fetch article');
+    sendProxyError(res, error, 'Failed to fetch article', req);
   }
 }

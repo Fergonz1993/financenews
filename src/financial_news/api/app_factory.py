@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
+from financial_news.api.container import attach_container, build_container
 from financial_news.api.errors import (
     http_exception_handler,
     unhandled_exception_handler,
@@ -59,4 +60,5 @@ def create_app() -> FastAPI:
     app.include_router(users_router)
     app.include_router(ingest_router)
     app.include_router(notifications_router)
+    attach_container(app, build_container())
     return app

@@ -1,5 +1,6 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import {
+  applyProxyResponseHeaders,
   enforceMethod,
   fastApiRequest,
   isBackendUnavailableError,
@@ -64,6 +65,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }),
     ]);
 
+    applyProxyResponseHeaders(res, req);
     res.status(200).json({
       articles,
       total: Number.isFinite(totalPayload?.total) ? Number(totalPayload.total) : articles.length,
@@ -77,10 +79,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         limit,
         offset,
       });
-      res.setHeader('X-Data-Source', 'local-fallback');
+      applyProxyResponseHeaders(res, req, 'fallback_read_only');
       res.status(200).json(fallback);
       return;
     }
-    sendProxyError(res, error, 'Failed to fetch articles');
+    sendProxyError(res, error, 'Failed to fetch articles', req);
   }
 }

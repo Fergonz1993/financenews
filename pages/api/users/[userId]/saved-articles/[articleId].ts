@@ -1,13 +1,14 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import {
+  applyProxyResponseHeaders,
   enforceMethod,
   fastApiRequest,
   isBackendUnavailableError,
+  sendReadOnlyFallback,
   sendProxyError,
 } from '../../../_utils/fastapiProxy';
 import {
   isLocalApiFallbackEnabled,
-  markArticleSavedLocally,
   isArticleSavedLocally,
 } from '../../../_utils/localDataFallback';
 
@@ -37,6 +38,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         method: 'POST',
         req,
       });
+      applyProxyResponseHeaders(res, req);
       res.status(200).json(payload);
       return;
     }
@@ -47,6 +49,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         method: 'DELETE',
         req,
       });
+      applyProxyResponseHeaders(res, req);
       res.status(200).json(payload);
       return;
     }
@@ -56,21 +59,29 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       method: 'GET',
       req,
     });
+    applyProxyResponseHeaders(res, req);
     res.status(200).json(status);
   } catch (error) {
     if (isLocalApiFallbackEnabled() && isBackendUnavailableError(error)) {
-      res.setHeader('X-Data-Source', 'local-fallback');
-
       if (req.method === 'POST') {
-        res.status(200).json(markArticleSavedLocally(userId, articleId, true));
+        sendReadOnlyFallback(
+          res,
+          req,
+          'Saved-article updates are disabled while the backend is unavailable.'
+        );
         return;
       }
 
       if (req.method === 'DELETE') {
-        res.status(200).json(markArticleSavedLocally(userId, articleId, false));
+        sendReadOnlyFallback(
+          res,
+          req,
+          'Saved-article updates are disabled while the backend is unavailable.'
+        );
         return;
       }
 
+      applyProxyResponseHeaders(res, req, 'fallback_read_only');
       res.status(200).json({
         user_id: userId,
         article_id: articleId,
@@ -78,6 +89,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
       return;
     }
-    sendProxyError(res, error, 'Saved article proxy failure');
+    sendProxyError(res, error, 'Saved article proxy failure', req);
   }
 }

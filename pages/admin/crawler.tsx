@@ -38,7 +38,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { NewsSource } from '../../lib/models/NewsSource';
+import type { NewsSource } from '@/src/types/ui';
 
 type SchedulerState = {
   enabled: boolean;
@@ -92,7 +92,9 @@ const extractAxiosErrorDetail = (error: unknown): string => {
       typeof error.response?.status === 'number'
         ? `${error.response.status}${error.response?.statusText ? ` ${error.response.statusText}` : ''}`
         : null;
-    const responseData = error.response?.data as { detail?: unknown; error?: unknown } | undefined;
+    const responseData = error.response?.data as
+      | { detail?: unknown; error?: unknown; message?: unknown; mode?: unknown }
+      | undefined;
     if (typeof responseData?.detail === 'string' && responseData.detail.trim()) {
       const detail = responseData.detail.trim();
       if (detail.toLowerCase() !== 'fetch failed') {
@@ -104,6 +106,9 @@ const extractAxiosErrorDetail = (error: unknown): string => {
       if (detail.toLowerCase() !== 'fetch failed') {
         return detail;
       }
+    }
+    if (typeof responseData?.message === 'string' && responseData.message.trim()) {
+      return responseData.message.trim();
     }
 
     if (statusText) {

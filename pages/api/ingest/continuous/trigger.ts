@@ -1,5 +1,10 @@
 import { NextApiRequest, NextApiResponse } from 'next';
-import { enforceMethod, fastApiRequest, sendProxyError } from '../../_utils/fastapiProxy';
+import {
+  applyProxyResponseHeaders,
+  enforceMethod,
+  fastApiRequest,
+  sendProxyError,
+} from '../../_utils/fastapiProxy';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (!enforceMethod(req, res, ['POST'])) {
@@ -12,8 +17,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       method: 'POST',
       req,
     });
+    applyProxyResponseHeaders(res, req);
     res.status(200).json(payload);
   } catch (error) {
-    sendProxyError(res, error, 'Continuous ingest trigger proxy error');
+    sendProxyError(res, error, 'Continuous ingest trigger proxy error', req);
   }
 }

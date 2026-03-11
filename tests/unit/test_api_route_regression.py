@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
@@ -35,6 +36,51 @@ def test_health_ready_reports_degraded_when_db_check_fails(monkeypatch) -> None:
     assert ready.status_code == 503
     assert ready.json()["status"] == "degraded"
     assert ready.json()["checks"]["database"] is False
+
+
+def test_health_ready_reports_degraded_when_ingest_freshness_is_stale(monkeypatch) -> None:
+    _patch_lifespan(monkeypatch)
+    monkeypatch.setattr(
+        system_routes,
+        "get_db_health_check",
+        lambda: AsyncMock(return_value=True),
+    )
+    monkeypatch.setattr(
+        api_main.ingester,
+        "get_source_health",
+        AsyncMock(
+            return_value=[
+                {
+                    "last_success_at": (
+                        datetime.now(UTC) - timedelta(days=4)
+                    ).isoformat(),
+                    "last_failure_at": None,
+                }
+            ]
+        ),
+    )
+    fake_run = type(
+        "FakeRun",
+        (),
+        {"finished_at": None, "items_stored": 0},
+    )()
+    monkeypatch.setattr(api_main.ingester, "get_last_run", AsyncMock(return_value=fake_run))
+    monkeypatch.setattr(
+        api_main.continuous_runner,
+        "get_status",
+        lambda: {"running": True, "interval_seconds": 300, "connectors": {}},
+    )
+
+    with TestClient(api_main.app) as client:
+        ready = client.get("/health/ready")
+
+    assert ready.status_code == 503
+    payload = ready.json()
+    assert payload["status"] == "degraded"
+    assert payload["checks"]["database"] is True
+    assert payload["checks"]["continuous_ingest"] is True
+    assert payload["checks"]["ingest_freshness"] is False
+    assert payload["freshness"]["freshness_state"] == "stale"
 
 
 def test_ingest_trigger_error_envelope_includes_request_id(monkeypatch) -> None:

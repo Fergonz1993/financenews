@@ -7,7 +7,7 @@ This runbook covers how the Next.js frontend behaves when the FastAPI backend is
 The Next API routes in `pages/api/*` follow this order:
 
 1. Try FastAPI backend (primary source of truth).
-2. If backend is unreachable (`502` connectivity failure), switch to local fallback data from `data/`.
+2. If backend is unreachable (`502` connectivity failure), switch to local read-only fallback data from `data/`.
 3. Preserve stable response contracts so frontend pages remain usable.
 
 Fallback data sources:
@@ -23,7 +23,7 @@ Use `GET /api/health` to inspect mode and data source status.
 Possible modes:
 
 - `backend`: FastAPI reachable.
-- `fallback`: FastAPI unreachable, local data fallback active.
+- `fallback_read_only`: FastAPI unreachable, local read-only fallback active.
 - `degraded`: neither backend nor usable local fallback data is available.
 
 ## Environment Variables
@@ -57,7 +57,7 @@ Artifacts:
 If you still see `502` in API responses:
 
 1. Check `GET /api/health`.
-2. If mode is `fallback`, verify `data/ingested_articles.json` exists and is valid JSON.
+2. If mode is `fallback_read_only`, verify `data/ingested_articles.json` exists and is valid JSON.
 3. If mode is `degraded`, either:
    - start FastAPI (`uvicorn financial_news.api.main:app --host 127.0.0.1 --port 8000`), or
    - regenerate local data via ingest scripts.

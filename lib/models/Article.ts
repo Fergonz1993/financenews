@@ -1,16 +1,5 @@
-import { Article as SharedArticle } from '../../src/types';
+import type { ApiArticle as SharedArticle } from '../../src/types/api';
+import type { ArticleFilters as SharedArticleFilters } from '../../src/types/ui';
 
 export type Article = SharedArticle;
-
-export interface ArticleFilters {
-  source?: string;
-  sentiment?: string;
-  topic?: string;
-  search?: string;
-  sortBy?: 'date' | 'relevance' | 'sentiment';
-  sortOrder?: 'asc' | 'desc';
-  startDate?: string;
-  endDate?: string;
-  limit?: number;
-  offset?: number;
-}
+export type ArticleFilters = SharedArticleFilters;

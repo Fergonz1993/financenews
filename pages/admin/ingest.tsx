@@ -23,6 +23,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
+import type { ApiIngestStatusResponse } from '@/src/types/api';
 
 type ConnectorInfo = {
   enabled: boolean;
@@ -50,14 +51,24 @@ type ContinuousStatus = {
   recent_errors: Array<{ time: string; error: string; type: string }>;
 };
 
-type IngestStatus = {
-  run_id?: string;
-  status?: string;
-  items_seen?: number;
-  items_stored?: number;
-  stored_article_count?: number;
-  scheduled_refresh_seconds?: number;
+type IngestStatus = ApiIngestStatusResponse & {
   continuous_runner?: ContinuousStatus;
+};
+
+const formatFreshness = (lagSeconds?: number | null): string => {
+  if (typeof lagSeconds !== 'number' || !Number.isFinite(lagSeconds)) {
+    return 'Unknown';
+  }
+  if (lagSeconds < 60) {
+    return `${lagSeconds}s`;
+  }
+  if (lagSeconds < 3600) {
+    return `${Math.round(lagSeconds / 60)}m`;
+  }
+  if (lagSeconds < 86400) {
+    return `${Math.round(lagSeconds / 3600)}h`;
+  }
+  return `${Math.round(lagSeconds / 86400)}d`;
 };
 
 const connectorDisplayNames: Record<string, string> = {
@@ -266,6 +277,18 @@ export default function IngestDashboard(): React.JSX.Element {
                             : '—'}
                         </span>
                       </div>
+                      <div>
+                        <span className="text-muted-foreground">Freshness Lag:</span>{' '}
+                        <span className="font-medium">
+                          {formatFreshness(status?.freshness_lag_seconds)}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Source of Truth:</span>{' '}
+                        <span className="font-medium capitalize">
+                          {status?.source_of_truth ?? 'Unknown'}
+                        </span>
+                      </div>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-3">
@@ -331,6 +354,10 @@ export default function IngestDashboard(): React.JSX.Element {
                           : 'Disabled'}
                       </span>
                     </div>
+                    <div>
+                      <span className="text-muted-foreground">Freshness State:</span>{' '}
+                      <Badge variant="outline">{status?.freshness_state ?? 'unknown'}</Badge>
+                    </div>
                   </CardContent>
                 </Card>
               </div>
@@ -342,7 +369,7 @@ export default function IngestDashboard(): React.JSX.Element {
                 </h2>
                 <div className="grid gap-4 sm:grid-cols-3">
                   {connectors &&
-                    Object.entries(connectors).map(([key, info]) => (
+                    Object.entries(connectors as Record<string, ConnectorInfo>).map(([key, info]) => (
                       <Card key={key}>
                         <CardHeader className="pb-3">
                           <div className="flex items-center justify-between">

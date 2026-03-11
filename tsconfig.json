@@ -31,6 +31,9 @@
   ],
   "exclude": [
     "node_modules",
-    "frontend-next/**"
+    "frontend-next/**",
+    "lib/crawlers/**",
+    "lib/crawler-init.ts",
+    "src/services/crawler/**"
   ]
 }

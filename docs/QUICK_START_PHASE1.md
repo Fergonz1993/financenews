@@ -1,3 +1,13 @@
+# Historical Document
+
+This quick start describes an older streaming/agent exploration and is no longer the canonical implementation guide.
+
+Use these docs instead:
+
+- `README.md`
+- `docs/product-north-star.md`
+- `docs/architecture-current.md`
+
 # 🚀 Quick Start: Phase 1 - Real-Time Financial News Streaming
 
 ## Prerequisites
@@ -190,4 +200,4 @@ Once Phase 1 is running smoothly, we'll implement:
 
 **Let's get Phase 1 running first! 🚀**
 
-Run: `python test_realtime_streams.py` to get started! 
+Run: `python test_realtime_streams.py` to get started!

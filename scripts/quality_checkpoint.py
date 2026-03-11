@@ -26,7 +26,9 @@ from pathlib import Path
 from typing import Any
 
 LEGACY_ACTIVE_MODULE_PATHS = (
+    "src/financial_news/api/api_management.py",
     "src/financial_news/api/main.py",
+    "src/financial_news/core/summarizer.py",
     "src/financial_news/services/news_ingest.py",
     "src/financial_news/services/continuous_runner.py",
     "src/financial_news/storage/repositories.py",

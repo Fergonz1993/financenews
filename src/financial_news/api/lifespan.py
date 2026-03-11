@@ -7,14 +7,16 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from financial_news.api.container import get_app_container
+from financial_news.api.lifecycle import shutdown_services, startup_services
+
 
 @asynccontextmanager
-async def app_lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """Delegate lifecycle hooks to the compatibility module."""
-    from financial_news.api import main as api_main
-
-    await api_main.startup_event()
+async def app_lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Run startup and shutdown hooks using the shared app container."""
+    container = get_app_container(app)
+    await startup_services(app.state, container)
     try:
         yield
     finally:
-        await api_main.shutdown_event()
+        await shutdown_services(app.state, container)

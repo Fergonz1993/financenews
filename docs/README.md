@@ -1,3 +1,13 @@
+# Historical Document
+
+This document reflects an older project phase and is preserved for context only.
+
+Current canonical docs:
+
+- `docs/product-north-star.md`
+- `docs/architecture-current.md`
+- `README.md`
+
 # 📈 Enhanced Financial News Summarizer
 
 > **AI-Powered Financial News Analysis & Intelligence Platform**

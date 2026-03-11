@@ -1,5 +1,6 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import {
+  applyProxyResponseHeaders,
   enforceMethod,
   fastApiRequest,
   isBackendUnavailableError,
@@ -33,13 +34,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       },
       req,
     });
+    applyProxyResponseHeaders(res, req);
     res.status(200).json(sources);
   } catch (error) {
     if (isLocalApiFallbackEnabled() && isBackendUnavailableError(error)) {
-      res.setHeader('X-Data-Source', 'local-fallback');
+      applyProxyResponseHeaders(res, req, 'fallback_read_only');
       res.status(200).json(getLocalSourceOptions());
       return;
     }
-    sendProxyError(res, error, 'Failed to fetch sources');
+    sendProxyError(res, error, 'Failed to fetch sources', req);
   }
 }

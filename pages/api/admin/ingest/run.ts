@@ -1,5 +1,6 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import {
+  applyProxyResponseHeaders,
   enforceMethod,
   fastApiRequest,
   isBackendUnavailableError,
@@ -30,15 +31,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       req,
     });
 
+    applyProxyResponseHeaders(res, req);
     res.status(202).json(response);
   } catch (error) {
     if (isBackendUnavailableError(error)) {
+      applyProxyResponseHeaders(res, req, 'backend_error');
       res.status(502).json({
         status: 'backend_unavailable',
         message: 'Unable to reach backend ingest control endpoint.',
       });
       return;
     }
-    sendProxyError(res, error, 'Admin ingest run proxy error');
+    sendProxyError(res, error, 'Admin ingest run proxy error', req);
   }
 }

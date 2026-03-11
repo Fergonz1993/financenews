@@ -1,6 +1,8 @@
+import crypto from 'crypto';
 import { NextApiRequest, NextApiResponse } from 'next';
 
 type QueryParams = Record<string, unknown>;
+type ProxyRequest = NextApiRequest & { __proxyRequestId?: string };
 
 const rawFastApiBaseUrl =
   process.env.FASTAPI_URL ||
@@ -24,6 +26,57 @@ const FASTAPI_GET_RETRIES = Math.max(
 );
 const FASTAPI_ADMIN_API_KEY =
   process.env.FASTAPI_ADMIN_API_KEY || process.env.ADMIN_API_KEY || '';
+const BACKEND_DATA_SOURCE = 'backend';
+
+function getOrCreateProxyRequestId(req?: NextApiRequest): string {
+  const request = req as ProxyRequest | undefined;
+  const existingHeader = req?.headers['x-request-id'];
+  const normalizedHeader = Array.isArray(existingHeader)
+    ? existingHeader[0]
+    : existingHeader;
+  if (typeof normalizedHeader === 'string' && normalizedHeader.trim()) {
+    if (request) {
+      request.__proxyRequestId = normalizedHeader.trim();
+    }
+    return normalizedHeader.trim();
+  }
+  if (request?.__proxyRequestId) {
+    return request.__proxyRequestId;
+  }
+  const requestId =
+    typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  if (request) {
+    request.__proxyRequestId = requestId;
+  }
+  return requestId;
+}
+
+export function applyProxyResponseHeaders(
+  res: NextApiResponse,
+  req?: NextApiRequest,
+  dataSource = BACKEND_DATA_SOURCE
+): string {
+  const requestId = getOrCreateProxyRequestId(req);
+  res.setHeader('X-Request-Id', requestId);
+  res.setHeader('X-Data-Source', dataSource);
+  return requestId;
+}
+
+export function sendReadOnlyFallback(
+  res: NextApiResponse,
+  req: NextApiRequest,
+  message: string
+): void {
+  applyProxyResponseHeaders(res, req, 'fallback_read_only');
+  res.status(503).json({
+    error: 'Read-only fallback mode',
+    message,
+    mode: 'fallback_read_only',
+    read_only: true,
+  });
+}
 
 export class FastApiProxyError extends Error {
   status: number;
@@ -142,9 +195,11 @@ export async function fastApiRequest<T = unknown>({
 }): Promise<T> {
   const url = new URL(path, FASTAPI_BASE_URL);
   appendQuery(url, query);
+  const requestId = getOrCreateProxyRequestId(req);
 
   const headers: Record<string, string> = {
     Accept: 'application/json',
+    'X-Request-Id': requestId,
   };
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json';
@@ -174,9 +229,6 @@ export async function fastApiRequest<T = unknown>({
   }
   if (req?.headers.cookie) {
     headers.Cookie = String(req.headers.cookie);
-  }
-  if (req?.headers['x-request-id']) {
-    headers['X-Request-Id'] = String(req.headers['x-request-id']);
   }
 
   let response: Response;
@@ -253,8 +305,10 @@ export async function checkBackendHealth(): Promise<{
 export function sendProxyError(
   res: NextApiResponse,
   error: unknown,
-  fallbackMessage = 'FastAPI proxy failure'
+  fallbackMessage = 'FastAPI proxy failure',
+  req?: NextApiRequest
 ): void {
+  applyProxyResponseHeaders(res, req, 'backend_error');
   if (error instanceof FastApiProxyError) {
     const payloadObject =
       error.payload && typeof error.payload === 'object'

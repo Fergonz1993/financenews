@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { defaultSources } from '@/src/services/crawler/data/default-sources';
+import { defaultSources } from '@/lib/fallback/defaultSources';
 
 export type LocalArticle = {
   id: string;
@@ -692,20 +692,28 @@ export const markArticleSavedLocally = (
 
 export const localDataDiagnostics = (): {
   fallback_enabled: boolean;
+  mode: 'fallback_read_only';
   local_articles_file: string | null;
   local_articles_count: number;
   local_sources_count: number;
   latest_article_at: string | null;
+  freshness_lag_seconds: number | null;
 } => {
   const articles = loadLocalArticles();
   const latest = articles[0];
   const foundFile = localArticleStoreFiles().find((candidate) => fs.existsSync(candidate)) || null;
+  const latestArticleAt = latest?.published_at || latest?.processed_at || null;
+  const freshnessLagSeconds = latestArticleAt
+    ? Math.max(0, Math.floor((Date.now() - Date.parse(latestArticleAt)) / 1000))
+    : null;
 
   return {
     fallback_enabled: isLocalApiFallbackEnabled(),
+    mode: 'fallback_read_only',
     local_articles_file: foundFile,
     local_articles_count: articles.length,
     local_sources_count: loadLocalSources().length,
-    latest_article_at: latest?.published_at || latest?.processed_at || null,
+    latest_article_at: latestArticleAt,
+    freshness_lag_seconds: Number.isFinite(freshnessLagSeconds) ? freshnessLagSeconds : null,
   };
 };

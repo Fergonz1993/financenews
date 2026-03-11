@@ -3,26 +3,28 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
+from financial_news.api.dependencies import (
+    get_continuous_runner,
+    get_ingester,
+    get_logger,
+    get_settings,
+)
+from financial_news.api.helpers import (
+    _build_freshness_snapshot,
+    _slugify_filter_value,
+)
 from financial_news.storage.db import get_db_health_check
 
 router = APIRouter()
 
-
-def _api() -> Any:
-    from financial_news.api import main as api_main
-
-    return api_main
-
-
 @router.get("/")
-async def root() -> dict[str, str]:
-    api_main = _api()
-    return {"message": "Financial News API", "version": api_main.get_settings().version}
+async def root(settings: Any = Depends(get_settings)) -> dict[str, str]:
+    return {"message": "Financial News API", "version": settings.version}
 
 
 @router.get("/health")
@@ -36,18 +38,29 @@ async def health_live() -> dict[str, str]:
 
 
 @router.get("/health/ready")
-async def health_ready() -> JSONResponse:
-    api_main = _api()
+async def health_ready(
+    ingester: Any = Depends(get_ingester),
+    continuous_runner: Any = Depends(get_continuous_runner),
+) -> JSONResponse:
     db_ok = await get_db_health_check()()
-    runner_status = api_main.continuous_runner.get_status()
+    runner_status = continuous_runner.get_status()
+    freshness = await _build_freshness_snapshot(
+        ingester=ingester,
+        runner_status=cast(dict[str, Any], runner_status),
+    )
+    freshness_ok = freshness.get("freshness_state") != "stale"
     checks = {
         "database": db_ok,
-        "continuous_ingest": bool(runner_status.get("running") or not api_main.continuous_runner.enabled),
+        "continuous_ingest": bool(
+            runner_status.get("running") or not continuous_runner.enabled
+        ),
+        "ingest_freshness": freshness_ok,
     }
     payload = {
         "status": "ready" if all(checks.values()) else "degraded",
         "timestamp": datetime.now(UTC).isoformat(),
         "checks": checks,
+        "freshness": freshness,
     }
     if all(checks.values()):
         return JSONResponse(status_code=200, content=payload)
@@ -55,12 +68,14 @@ async def health_ready() -> JSONResponse:
 
 
 @router.get("/api/topics")
-async def get_topics() -> list[dict[str, str]]:
-    api_main = _api()
+async def get_topics(
+    ingester: Any = Depends(get_ingester),
+    logger: Any = Depends(get_logger),
+) -> list[dict[str, str]]:
     try:
-        topics = await api_main.ingester.get_topics()
+        topics = await ingester.get_topics()
     except Exception as exc:
-        api_main.logger.warning(
+        logger.warning(
             "DB read failed in get_topics; returning empty list: %s",
             exc,
         )
@@ -68,14 +83,15 @@ async def get_topics() -> list[dict[str, str]]:
     topics = topics or []
     topics = sorted({str(topic) for topic in topics if topic})
     return [
-        {"id": api_main._slugify_filter_value(topic), "name": topic}
+        {"id": _slugify_filter_value(topic), "name": topic}
         for topic in topics
     ]
 
 
 @router.post("/api/analyze/sentiment")
 async def analyze_sentiment(data: dict[str, Any]) -> Any:
-    api_main = _api()
+    from financial_news.api.main import analyze_article_sentiment
+
     if "text" not in data:
         raise HTTPException(status_code=400, detail="Text field is required")
-    return api_main.analyze_article_sentiment(data["text"])
+    return analyze_article_sentiment(data["text"])

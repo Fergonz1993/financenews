@@ -1,5 +1,10 @@
 import { NextApiRequest, NextApiResponse } from 'next';
-import { enforceMethod, fastApiRequest, sendProxyError } from '../_utils/fastapiProxy';
+import {
+  applyProxyResponseHeaders,
+  enforceMethod,
+  fastApiRequest,
+  sendProxyError,
+} from '../_utils/fastapiProxy';
 
 function asSingle(value: string | string[] | undefined): string | undefined {
   if (!value) {
@@ -23,6 +28,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         },
         req,
       });
+      applyProxyResponseHeaders(res, req);
       res.status(200).json(payload);
       return;
     }
@@ -36,8 +42,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       body: req.body || {},
       req,
     });
+    applyProxyResponseHeaders(res, req);
     res.status(200).json(payload);
   } catch (error) {
-    sendProxyError(res, error, 'User alerts proxy error');
+    sendProxyError(res, error, 'User alerts proxy error', req);
   }
 }

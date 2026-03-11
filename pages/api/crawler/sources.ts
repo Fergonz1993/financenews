@@ -1,15 +1,15 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import {
+  applyProxyResponseHeaders,
   enforceMethod,
   fastApiRequest,
   isBackendUnavailableError,
+  sendReadOnlyFallback,
   sendProxyError,
 } from '../_utils/fastapiProxy';
 import {
-  deleteLocalSource,
   isLocalApiFallbackEnabled,
   loadLocalSources,
-  upsertLocalSource,
 } from '../_utils/localDataFallback';
 
 type SourceRow = {
@@ -82,6 +82,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           healthMap.set(item.source_id, item);
         }
       });
+      applyProxyResponseHeaders(res, req);
       res.status(200).json(sources.map((source) => mapSourceForAdmin(source, healthMap)));
       return;
     }
@@ -110,6 +111,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         },
         req,
       });
+      applyProxyResponseHeaders(res, req);
       res.status(200).json({
         id: upserted.id,
         name: upserted.name,
@@ -134,6 +136,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       method: 'DELETE',
       req,
     });
+    applyProxyResponseHeaders(res, req);
     res.status(200).json({ status: 'Source removed' });
   } catch (error) {
     if (isLocalApiFallbackEnabled() && isBackendUnavailableError(error)) {
@@ -156,57 +159,29 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           userAgent: source.userAgent,
           waitTime: source.waitTime,
         }));
-        res.setHeader('X-Data-Source', 'local-fallback');
+        applyProxyResponseHeaders(res, req, 'fallback_read_only');
         res.status(200).json(localSources);
         return;
       }
 
       if (req.method === 'POST') {
-        const sourceData = req.body as CrawlerSourcePayload;
-        if (!sourceData.name || !sourceData.url || !sourceData.type) {
-          res.status(400).json({ error: 'Missing required fields' });
-          return;
-        }
-
-        const upserted = upsertLocalSource({
-          id: sourceData.id,
-          name: sourceData.name,
-          url: sourceData.url,
-          type: sourceData.type,
-          category: sourceData.category || 'news',
-          crawlFrequency: Number(sourceData.crawlFrequency || 30),
-          isActive: sourceData.isActive !== false,
-        });
-        res.setHeader('X-Data-Source', 'local-fallback');
-        res.status(200).json({
-          id: upserted.id,
-          name: upserted.name,
-          url: upserted.url,
-          type: upserted.type,
-          category: upserted.category,
-          crawlFrequency: upserted.crawlFrequency,
-          isActive: upserted.isActive,
-        });
+        sendReadOnlyFallback(
+          res,
+          req,
+          'Source changes are disabled while the backend is unavailable.'
+        );
         return;
       }
 
       if (req.method === 'DELETE') {
-        const idRaw = req.query.id;
-        const sourceId = Array.isArray(idRaw) ? idRaw[0] : idRaw;
-        if (!sourceId) {
-          res.status(400).json({ error: 'Source ID is required' });
-          return;
-        }
-        const removed = deleteLocalSource(sourceId);
-        if (!removed) {
-          res.status(404).json({ error: 'Source not found' });
-          return;
-        }
-        res.setHeader('X-Data-Source', 'local-fallback');
-        res.status(200).json({ status: 'Source removed' });
+        sendReadOnlyFallback(
+          res,
+          req,
+          'Source changes are disabled while the backend is unavailable.'
+        );
         return;
       }
     }
-    sendProxyError(res, error, 'Sources API proxy error');
+    sendProxyError(res, error, 'Sources API proxy error', req);
   }
 }

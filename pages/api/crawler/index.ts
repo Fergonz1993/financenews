@@ -1,9 +1,11 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import {
+  applyProxyResponseHeaders,
   FastApiProxyError,
   enforceMethod,
   fastApiRequest,
   isBackendUnavailableError,
+  sendReadOnlyFallback,
   sendProxyError,
 } from '../_utils/fastapiProxy';
 import {
@@ -105,6 +107,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const schedulerEnabled =
         Number.isFinite(scheduledRefreshSeconds) && scheduledRefreshSeconds > 0;
 
+      applyProxyResponseHeaders(res, req);
       res.status(200).json({
         totalSources: sourcesInfo.length,
         activeSources: sourcesInfo.filter((source) => source.isActive).length,
@@ -136,6 +139,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           typeof result.status === 'string' && result.status.trim()
             ? result.status
             : 'Crawl queued';
+        applyProxyResponseHeaders(res, req);
         res.status(200).json({
           status: statusText,
           queued: true,
@@ -148,16 +152,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return;
       } catch (error) {
         if (isLocalApiFallbackEnabled() && isBackendUnavailableError(error)) {
-          res.setHeader('X-Data-Source', 'local-fallback');
-          res.status(200).json({
-            status: 'Backend unavailable. Showing cached local data.',
-            queued: false,
-            alreadyRunning: false,
-            error: false,
-            newArticles: 0,
-            runId: null,
-            fallback: true,
-          });
+          sendReadOnlyFallback(
+            res,
+            req,
+            'Crawler runs cannot be queued while the backend is unavailable.'
+          );
           return;
         }
         if (error instanceof FastApiProxyError) {
@@ -201,6 +200,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           intervalSeconds > 0
             ? `Current configured interval is ${intervalSeconds} seconds.`
             : 'Current interval is disabled (0 seconds).';
+        applyProxyResponseHeaders(res, req);
         res.status(200).json({
           status:
             action === 'start_scheduler'
@@ -215,16 +215,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return;
       } catch (error) {
         if (isLocalApiFallbackEnabled() && isBackendUnavailableError(error)) {
-          res.setHeader('X-Data-Source', 'local-fallback');
-          res.status(200).json({
-            status: 'Backend unavailable. Scheduler controls require backend mode.',
-            action,
-            scheduler: {
-              enabled: false,
-              intervalSeconds: 0,
-            },
-            fallback: true,
-          });
+          sendReadOnlyFallback(
+            res,
+            req,
+            'Scheduler controls require backend mode and are disabled in fallback.'
+          );
           return;
         }
         throw error;
@@ -236,7 +231,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (isLocalApiFallbackEnabled() && isBackendUnavailableError(error)) {
       const localSources = loadLocalSources();
       const localStats = getLocalCrawlerStats();
-      res.setHeader('X-Data-Source', 'local-fallback');
+      applyProxyResponseHeaders(res, req, 'fallback_read_only');
       res.status(200).json({
         ...localStats,
         sourcesInfo: localSources.map((source) => ({
@@ -250,6 +245,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
       return;
     }
-    sendProxyError(res, error, 'Crawler API proxy error');
+    sendProxyError(res, error, 'Crawler API proxy error', req);
   }
 }

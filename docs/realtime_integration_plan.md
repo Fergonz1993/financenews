@@ -1,3 +1,12 @@
+# Historical Document
+
+This plan reflects an earlier architecture direction focused on speculative real-time and agent expansion.
+
+The current implementation direction is documented in:
+
+- `docs/product-north-star.md`
+- `docs/architecture-current.md`
+
 # 🚀 Financial News AI 2025 - Execution Plan
 
 ## Current Status ✅
@@ -255,4 +264,4 @@ pip install websocket-client socket.io-client fastapi uvicorn
 - **Kubernetes** for container orchestration
 - **Kafka** for event streaming
 
-Ready to execute? Let's start with Phase 1! 🚀 
+Ready to execute? Let's start with Phase 1! 🚀

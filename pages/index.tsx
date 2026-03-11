@@ -20,7 +20,7 @@ import {
 } from '../components/ui/card';
 import { Input } from '../components/ui/input';
 import { cn } from '../lib/utils';
-import { type ArticleSummary, type ArticlesResponse } from '../src/types';
+import type { ApiArticleSummary as ArticleSummary, ApiArticlesResponse as ArticlesResponse } from '../src/types/api';
 
 type SentimentFilter = '' | 'positive' | 'neutral' | 'negative';
 type SortOption = 'date' | 'relevance' | 'sentiment';

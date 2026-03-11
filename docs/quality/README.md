@@ -15,7 +15,9 @@ The scorecard includes both repo-wide debt and active-module debt:
 
 Active modules are currently:
 
+- `src/financial_news/api/api_management.py`
 - `src/financial_news/api/main.py`
+- `src/financial_news/core/summarizer.py`
 - `src/financial_news/services/news_ingest.py`
 - `src/financial_news/services/continuous_runner.py`
 - `src/financial_news/storage/repositories.py`

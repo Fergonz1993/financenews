@@ -154,6 +154,11 @@ async def test_ingest_status_contract_shape(monkeypatch: pytest.MonkeyPatch) -> 
     assert payload["stored_article_count"] == 42
     assert "scheduled_refresh_seconds" in payload
     assert "continuous_runner" in payload
+    assert "freshness_lag_seconds" in payload
+    assert "freshness_threshold_seconds" in payload
+    assert "freshness_state" in payload
+    assert "source_of_truth" in payload
+    assert "data_mode" in payload
 
 
 def test_admin_auth_requires_key_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:

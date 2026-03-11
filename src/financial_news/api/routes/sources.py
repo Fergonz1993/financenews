@@ -3,45 +3,56 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
+from typing import Any
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from financial_news.api.dependencies import require_admin_access
+from financial_news.api.dependencies import (
+    get_ingester,
+    get_logger,
+    get_source_repo,
+    require_admin_access,
+)
+from financial_news.api.helpers import (
+    _load_articles_from_db,
+    _request_id_from_request,
+    _serialize_source,
+    _slugify_filter_value,
+    _source_key_from_request,
+    _validate_source_url_or_raise,
+    _with_request_id,
+)
 from financial_news.api.schemas import SourceUpsertRequest, SourceValidationRequest
 from financial_news.storage.repositories import SourceConfig
 
 router = APIRouter()
-
-
-def _api() -> Any:
-    from financial_news.api import main as api_main
-
-    return api_main
-
 
 @router.get("/api/sources")
 async def get_sources(
     source_category: str | None = Query(None, description="Filter by source category."),
     connector_type: str | None = Query(None, description="Filter by connector type."),
     include_disabled: bool = Query(False, description="Include disabled sources."),
+    source_repo: Any = Depends(get_source_repo),
+    ingester: Any = Depends(get_ingester),
+    logger: Any = Depends(get_logger),
 ) -> list[dict[str, Any]]:
-    api_main = _api()
     try:
-        sources = await api_main.source_repo.list_sources(
+        sources = await source_repo.list_sources(
             enabled_only=not include_disabled,
             source_category=source_category,
             connector_type=connector_type,
         )
     except Exception as exc:
-        api_main.logger.warning(
+        logger.warning(
             "DB read failed in get_sources; using article-derived fallback: %s",
             exc,
         )
         sources = []
     if not sources:
-        articles = await api_main._load_articles_from_db(
+        articles = await _load_articles_from_db(
+            ingester=ingester,
+            logger=logger,
             source=None,
             sentiment=None,
             topic=None,
@@ -62,8 +73,8 @@ async def get_sources(
         )
         return [
             {
-                "id": api_main._slugify_filter_value(source),
-                "source_key": api_main._slugify_filter_value(source),
+                "id": _slugify_filter_value(source),
+                "source_key": _slugify_filter_value(source),
                 "name": source,
                 "source_type": "rss",
                 "source_category": None,
@@ -82,7 +93,7 @@ async def get_sources(
             for source in values
         ]
 
-    return [api_main._serialize_source(source) for source in sources]
+    return [_serialize_source(source) for source in sources]
 
 
 @router.post("/api/sources")
@@ -90,17 +101,18 @@ async def upsert_source(
     source: SourceUpsertRequest,
     request: Request,
     admin_actor: str = Depends(require_admin_access("admin")),
+    source_repo: Any = Depends(get_source_repo),
+    logger: Any = Depends(get_logger),
 ) -> dict[str, Any]:
-    api_main = _api()
-    request_id = api_main._request_id_from_request(request)
-    api_main.logger.info(
+    request_id = _request_id_from_request(request)
+    logger.info(
         "admin_upsert_source request_id=%s actor=%s source_key=%s",
         request_id,
         admin_actor,
-        api_main._source_key_from_request(source),
+        _source_key_from_request(source),
     )
-    api_main._validate_source_url_or_raise(source.url)
-    source_key = api_main._source_key_from_request(source)
+    _validate_source_url_or_raise(source.url)
+    source_key = _source_key_from_request(source)
     parsed = urlparse(source.url)
 
     source_config = SourceConfig(
@@ -123,15 +135,12 @@ async def upsert_source(
         retry_policy=source.retry_policy or {},
         parser_contract=source.parser_contract or {},
     )
-    persisted = await api_main.source_repo.upsert_sources([source_config])
+    persisted = await source_repo.upsert_sources([source_config])
     if not persisted:
         raise HTTPException(status_code=500, detail="Unable to persist source")
-    return cast(
-        dict[str, Any],
-        api_main._with_request_id(
-            api_main._serialize_source(persisted[0]),
-            request_id=request_id,
-        ),
+    return _with_request_id(
+        _serialize_source(persisted[0]),
+        request_id=request_id,
     )
 
 
@@ -140,35 +149,36 @@ async def disable_source(
     source_identifier: str,
     request: Request,
     admin_actor: str = Depends(require_admin_access("admin")),
+    source_repo: Any = Depends(get_source_repo),
+    logger: Any = Depends(get_logger),
 ) -> dict[str, Any]:
-    api_main = _api()
-    request_id = api_main._request_id_from_request(request)
-    api_main.logger.info(
+    request_id = _request_id_from_request(request)
+    logger.info(
         "admin_disable_source request_id=%s actor=%s source_identifier=%s",
         request_id,
         admin_actor,
         source_identifier,
     )
-    source = await api_main.source_repo.set_enabled(source_identifier, enabled=False)
+    source = await source_repo.set_enabled(source_identifier, enabled=False)
     if source is None:
         raise HTTPException(status_code=404, detail="Source not found")
-    return cast(
-        dict[str, Any],
-        api_main._with_request_id(
-            {"status": "disabled", "source": api_main._serialize_source(source)},
-            request_id=request_id,
-        ),
+    return _with_request_id(
+        {"status": "disabled", "source": _serialize_source(source)},
+        request_id=request_id,
     )
 
 
 @router.get("/api/sources/{source_identifier}/health")
-async def get_source_health_by_id(source_identifier: str) -> dict[str, Any]:
-    api_main = _api()
-    source = await api_main.source_repo.get_by_identifier(source_identifier)
+async def get_source_health_by_id(
+    source_identifier: str,
+    source_repo: Any = Depends(get_source_repo),
+    ingester: Any = Depends(get_ingester),
+) -> dict[str, Any]:
+    source = await source_repo.get_by_identifier(source_identifier)
     if source is None:
         raise HTTPException(status_code=404, detail="Source not found")
 
-    health = await api_main.ingester.get_source_health()
+    health = await ingester.get_source_health()
     matched = next((item for item in health if item.get("source_id") == source.id), None)
     if matched is None:
         matched = {
@@ -249,7 +259,7 @@ async def get_source_health_by_id(source_identifier: str) -> dict[str, Any]:
         "next_due_at": next_due_at,
         "status": status,
     }
-    return {"source": api_main._serialize_source(source), "health": matched}
+    return {"source": _serialize_source(source), "health": matched}
 
 
 @router.get("/api/admin/sources/{source_identifier}/health")
@@ -262,8 +272,7 @@ async def get_admin_source_health_by_id(
 
 @router.post("/api/sources/validate")
 async def validate_source(payload: SourceValidationRequest) -> dict[str, Any]:
-    api_main = _api()
-    api_main._validate_source_url_or_raise(payload.source_url)
+    _validate_source_url_or_raise(payload.source_url)
     parsed = urlparse(payload.source_url)
     messages: list[str] = []
     if "sec.gov" in parsed.netloc.lower():
