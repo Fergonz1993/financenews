@@ -175,14 +175,17 @@ def discover_active_module_paths() -> tuple[str, ...]:
         _git_stdout_lines(["git", "ls-files", "--others", "--exclude-standard"])
     )
 
+    changed_paths = _dedupe_paths(discovered_paths)
     relevant_paths = [
         path
-        for path in discovered_paths
+        for path in changed_paths
         if _is_relevant_active_module(path)
     ]
     active_module_paths = _dedupe_paths(relevant_paths)
     if active_module_paths:
         return active_module_paths
+    if changed_paths:
+        return ()
     return LEGACY_ACTIVE_MODULE_PATHS
 
 
