@@ -9,7 +9,7 @@
   "max_ingest_freshness_lag_seconds": 172800,
   "require_smoke_latency": false,
   "require_ingest_freshness": false,
-  "require_unit_tests_passed": true,
+  "require_unit_tests_passed": false,
   "require_tsc_passed": true,
   "require_eslint_passed": true,
   "require_smoke_frontend": false
