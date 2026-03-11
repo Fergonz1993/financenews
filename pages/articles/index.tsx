@@ -6,6 +6,7 @@ import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { Card, CardContent } from '../../components/ui/card';
 import { Input } from '../../components/ui/input';
+import { useDebounce } from '../../lib/useDebounce';
 
 // Article type definition
 type Article = {
@@ -105,6 +106,7 @@ export default function ArticlesPage() {
   const [topic, setTopic] = useState('');
   const [sentiment, setSentiment] = useState<SentimentFilter>('');
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 300);
   const [sortBy, setSortBy] = useState<SortOption>('date');
 
   useEffect(() => {
@@ -159,7 +161,7 @@ export default function ArticlesPage() {
       if (source) params.append('source', source);
       if (topic) params.append('topic', topic);
       if (sentiment) params.append('sentiment', sentiment);
-      if (search) params.append('search', search);
+      if (debouncedSearch) params.append('search', debouncedSearch);
       params.append('sort_by', sortBy);
       params.append('sort_order', 'desc');
       params.append('limit', '20');
@@ -192,7 +194,7 @@ export default function ArticlesPage() {
     };
 
     fetchArticles();
-  }, [source, topic, sentiment, search, sortBy, retryTick]);
+  }, [source, topic, sentiment, debouncedSearch, sortBy, retryTick]);
 
   // Handle article click
   const handleArticleClick = (id: string) => {

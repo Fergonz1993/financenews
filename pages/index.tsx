@@ -20,6 +20,7 @@ import {
 } from '../components/ui/card';
 import { Input } from '../components/ui/input';
 import { cn } from '../lib/utils';
+import { useDebounce } from '../lib/useDebounce';
 import { type ArticleSummary, type ArticlesResponse } from '../src/types';
 
 type SentimentFilter = '' | 'positive' | 'neutral' | 'negative';
@@ -88,7 +89,7 @@ export default function HomePage(): React.JSX.Element {
   const [sentiment, setSentiment] = useState<SentimentFilter>('');
   const [sortBy, setSortBy] = useState<SortOption>('date');
   const [searchInput, setSearchInput] = useState('');
-  const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(searchInput, 300);
   const [loading, setLoading] = useState(true);
   const [retrying, setRetrying] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -96,19 +97,11 @@ export default function HomePage(): React.JSX.Element {
   const [autoRefresh, setAutoRefresh] = useState(false);
   const autoRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setSearch(searchInput);
-    }, 300);
-
-    return () => clearTimeout(timer);
-  }, [searchInput]);
-
   const queryParams = useMemo(() => {
     const params = new URLSearchParams();
 
-    if (search) {
-      params.set('search', search);
+    if (debouncedSearch) {
+      params.set('search', debouncedSearch);
     }
 
     if (sentiment) {
@@ -120,7 +113,7 @@ export default function HomePage(): React.JSX.Element {
     params.set('limit', String(limit));
 
     return params.toString();
-  }, [search, sentiment, sortBy, limit]);
+  }, [debouncedSearch, sentiment, sortBy, limit]);
 
   const fetchArticles = useCallback(
     async (isRetry = false) => {
@@ -178,7 +171,6 @@ export default function HomePage(): React.JSX.Element {
 
   const handleResetFilters = () => {
     setSearchInput('');
-    setSearch('');
     setSentiment('');
     setSortBy('date');
     setLimit(10);
@@ -194,7 +186,7 @@ export default function HomePage(): React.JSX.Element {
   const isEmpty = !loading && !error && articles.length === 0;
   const canRenderContent = !loading && !error && articles.length > 0;
   const activeFilterCount =
-    Number(Boolean(search)) + Number(Boolean(sentiment)) + Number(sortBy !== 'date') +
+    Number(Boolean(debouncedSearch)) + Number(Boolean(sentiment)) + Number(sortBy !== 'date') +
     Number(limit !== 10);
 
   return (
