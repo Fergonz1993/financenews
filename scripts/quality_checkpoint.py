@@ -152,6 +152,19 @@ def discover_active_module_paths() -> tuple[str, ...]:
     discovered_paths.extend(
         _git_stdout_lines(["git", "diff", "--name-only", "--diff-filter=ACMRTUXB", "HEAD"])
     )
+    discovered_paths.extend(
+        _git_stdout_lines(
+            [
+                "git",
+                "diff-tree",
+                "--no-commit-id",
+                "--name-only",
+                "--diff-filter=ACMRTUXB",
+                "-r",
+                "HEAD",
+            ]
+        )
+    )
     if _git_has_head_parent():
         discovered_paths.extend(
             _git_stdout_lines(
