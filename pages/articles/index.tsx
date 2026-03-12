@@ -6,6 +6,7 @@ import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { Card, CardContent } from '../../components/ui/card';
 import { Input } from '../../components/ui/input';
+import { useDebounce } from '../../lib/useDebounce';
 
 // Article type definition
 type Article = {
@@ -104,7 +105,8 @@ export default function ArticlesPage() {
   const [source, setSource] = useState('');
   const [topic, setTopic] = useState('');
   const [sentiment, setSentiment] = useState<SentimentFilter>('');
-  const [search, setSearch] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const [search, flushSearch] = useDebounce(searchInput, 300);
   const [sortBy, setSortBy] = useState<SortOption>('date');
 
   useEffect(() => {
@@ -200,8 +202,29 @@ export default function ArticlesPage() {
   };
 
   const handleRetry = () => {
+    flushSearch();
     setRetrying(true);
     setRetryTick((prev) => prev + 1);
+  };
+
+  const handleSourceChange = (nextSource: string) => {
+    flushSearch();
+    setSource(nextSource);
+  };
+
+  const handleTopicChange = (nextTopic: string) => {
+    flushSearch();
+    setTopic(nextTopic);
+  };
+
+  const handleSentimentChange = (nextSentiment: SentimentFilter) => {
+    flushSearch();
+    setSentiment(nextSentiment);
+  };
+
+  const handleSortChange = (nextSortBy: SortOption) => {
+    flushSearch();
+    setSortBy(nextSortBy);
   };
 
   const getSentimentStyle = (
@@ -299,8 +322,8 @@ export default function ArticlesPage() {
               <Input
                 id="article-search"
                 placeholder="Search article title or summary"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
               />
             </div>
 
@@ -315,7 +338,7 @@ export default function ArticlesPage() {
                 id="source-filter"
                 value={source}
                 className={selectClassName}
-                onChange={(e) => setSource(e.target.value)}
+                onChange={(e) => handleSourceChange(e.target.value)}
               >
                 <option value="">All Sources</option>
                 {sources.map((sourceOption) => (
@@ -337,7 +360,7 @@ export default function ArticlesPage() {
                 id="topic-filter"
                 value={topic}
                 className={selectClassName}
-                onChange={(e) => setTopic(e.target.value)}
+                onChange={(e) => handleTopicChange(e.target.value)}
               >
                 <option value="">All Topics</option>
                 {topics.map((topicOption) => (
@@ -359,7 +382,7 @@ export default function ArticlesPage() {
                 id="sentiment-filter"
                 value={sentiment}
                 className={selectClassName}
-                onChange={(e) => setSentiment(e.target.value as SentimentFilter)}
+                onChange={(e) => handleSentimentChange(e.target.value as SentimentFilter)}
               >
                 <option value="">All</option>
                 <option value="positive">Positive</option>
@@ -379,7 +402,7 @@ export default function ArticlesPage() {
                 id="sort-filter"
                 value={sortBy}
                 className={selectClassName}
-                onChange={(e) => setSortBy(e.target.value as SortOption)}
+                onChange={(e) => handleSortChange(e.target.value as SortOption)}
               >
                 <option value="date">Date</option>
                 <option value="relevance">Relevance</option>
