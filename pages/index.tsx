@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
 import {
   CalendarClock,
@@ -19,6 +19,7 @@ import {
   CardTitle,
 } from '../components/ui/card';
 import { Input } from '../components/ui/input';
+import { useDebounce } from '../lib/useDebounce';
 import { cn } from '../lib/utils';
 import type { ApiArticleSummary as ArticleSummary, ApiArticlesResponse as ArticlesResponse } from '../src/types/api';
 
@@ -88,7 +89,7 @@ export default function HomePage(): React.JSX.Element {
   const [sentiment, setSentiment] = useState<SentimentFilter>('');
   const [sortBy, setSortBy] = useState<SortOption>('date');
   const [searchInput, setSearchInput] = useState('');
-  const [search, setSearch] = useState('');
+  const [search, flushSearch] = useDebounce(searchInput, 300);
   const [loading, setLoading] = useState(true);
   const [retrying, setRetrying] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -96,19 +97,11 @@ export default function HomePage(): React.JSX.Element {
   const [autoRefresh, setAutoRefresh] = useState(false);
   const autoRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setSearch(searchInput);
-    }, 300);
-
-    return () => clearTimeout(timer);
-  }, [searchInput]);
-
-  const queryParams = useMemo(() => {
+  const buildQueryParams = useCallback((searchTerm: string) => {
     const params = new URLSearchParams();
 
-    if (search) {
-      params.set('search', search);
+    if (searchTerm) {
+      params.set('search', searchTerm);
     }
 
     if (sentiment) {
@@ -120,16 +113,16 @@ export default function HomePage(): React.JSX.Element {
     params.set('limit', String(limit));
 
     return params.toString();
-  }, [search, sentiment, sortBy, limit]);
+  }, [sentiment, sortBy, limit]);
 
   const fetchArticles = useCallback(
-    async (isRetry = false) => {
+    async (isRetry = false, searchTerm = search) => {
       setLoading(true);
       setError(null);
       setRetrying(isRetry);
 
       try {
-        const response = await fetch(`/api/articles?${queryParams}`);
+        const response = await fetch(`/api/articles?${buildQueryParams(searchTerm)}`);
         if (!response.ok) {
           throw new Error(`Failed to fetch articles (${response.status})`);
         }
@@ -151,7 +144,7 @@ export default function HomePage(): React.JSX.Element {
         setRetrying(false);
       }
     },
-    [queryParams]
+    [buildQueryParams, search]
   );
 
   useEffect(() => {
@@ -173,15 +166,31 @@ export default function HomePage(): React.JSX.Element {
   }, [autoRefresh, fetchArticles]);
 
   const handleRetry = () => {
-    fetchArticles(true);
+    flushSearch();
+    fetchArticles(true, searchInput);
   };
 
   const handleResetFilters = () => {
     setSearchInput('');
-    setSearch('');
+    flushSearch('');
     setSentiment('');
     setSortBy('date');
     setLimit(10);
+  };
+
+  const handleSentimentChange = (nextSentiment: SentimentFilter) => {
+    flushSearch();
+    setSentiment(nextSentiment);
+  };
+
+  const handleSortChange = (nextSortBy: SortOption) => {
+    flushSearch();
+    setSortBy(nextSortBy);
+  };
+
+  const handleLimitChange = (nextLimit: LimitOption) => {
+    flushSearch();
+    setLimit(nextLimit);
   };
 
   const handleArticleClick = (article: ArticleSummary) => {
@@ -290,7 +299,7 @@ export default function HomePage(): React.JSX.Element {
               <select
                 value={sentiment}
                 className={selectClassName}
-                onChange={(event) => setSentiment(event.target.value as SentimentFilter)}
+                onChange={(event) => handleSentimentChange(event.target.value as SentimentFilter)}
               >
                 <option value="">All</option>
                 {SENTIMENT_OPTIONS.map((option) => (
@@ -308,7 +317,7 @@ export default function HomePage(): React.JSX.Element {
               <select
                 value={sortBy}
                 className={selectClassName}
-                onChange={(event) => setSortBy(event.target.value as SortOption)}
+                onChange={(event) => handleSortChange(event.target.value as SortOption)}
               >
                 {SORT_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -325,7 +334,7 @@ export default function HomePage(): React.JSX.Element {
               <select
                 value={String(limit)}
                 className={selectClassName}
-                onChange={(event) => setLimit(Number(event.target.value) as LimitOption)}
+                onChange={(event) => handleLimitChange(Number(event.target.value) as LimitOption)}
               >
                 {LIMIT_OPTIONS.map((option) => (
                   <option key={option} value={option}>
