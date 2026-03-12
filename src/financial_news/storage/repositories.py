@@ -499,15 +499,9 @@ class ArticleRepository:
     async def get_topics_from_articles(self) -> list[str]:
         async with self._session_factory() as session:
             result = await session.execute(
-                select(Article.topics).where(Article.topics.is_not(None))
+                select(func.unnest(Article.topics).label("topic")).distinct()
             )
-            seen: set[str] = set()
-            topics: list[str] = []
-            for row in result.all():
-                for item in row[0] or []:
-                    if item and item not in seen:
-                        seen.add(item)
-                        topics.append(item)
+            topics = [row.topic for row in result.all() if row.topic]
             return sorted(topics)
 
     async def upsert_deduplicated(
