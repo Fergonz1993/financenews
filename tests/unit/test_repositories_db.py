@@ -66,7 +66,7 @@ async def session_factory() -> object:
             await conn.execute(
                 text(
                     "TRUNCATE TABLE "
-                    "runtime_snapshots, user_alert_preferences, user_settings, user_saved_articles, "
+                    "user_alert_preferences, user_settings, user_saved_articles, "
                     "article_dedupe, articles, ingestion_state, ingestion_runs, sources "
                     "RESTART IDENTITY CASCADE"
                 )

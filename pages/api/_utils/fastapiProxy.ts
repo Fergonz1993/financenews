@@ -24,9 +24,17 @@ const FASTAPI_GET_RETRIES = Math.max(
   0,
   Number.parseInt(process.env.FASTAPI_GET_RETRIES || '1', 10) || 0
 );
-const FASTAPI_ADMIN_API_KEY =
+const SERVER_FASTAPI_ADMIN_API_KEY =
   process.env.FASTAPI_ADMIN_API_KEY || process.env.ADMIN_API_KEY || '';
+const SERVER_FASTAPI_ADMIN_ROLE = process.env.FASTAPI_ADMIN_ROLE || 'ops';
+const SERVER_FASTAPI_ADMIN_ACTOR = process.env.FASTAPI_ADMIN_ACTOR || 'next-bff';
 const BACKEND_DATA_SOURCE = 'backend';
+
+type AdminRequestOptions = {
+  useServerCredentials?: boolean;
+  actor?: string;
+  role?: string;
+};
 
 function getOrCreateProxyRequestId(req?: NextApiRequest): string {
   const request = req as ProxyRequest | undefined;
@@ -147,6 +155,23 @@ export function isBackendUnavailableError(error: unknown): error is FastApiProxy
   );
 }
 
+export function isMissingServerAdminCredentialsError(
+  error: unknown
+): error is FastApiProxyError {
+  if (!(error instanceof FastApiProxyError)) {
+    return false;
+  }
+  if (error.status !== 503) {
+    return false;
+  }
+  const detail = `${error.message} ${errorDetail(error.payload)}`.toLowerCase();
+  return (
+    detail.includes('server-side admin credentials') ||
+    detail.includes('fastapi_admin_api_key') ||
+    detail.includes('admin_api_key')
+  );
+}
+
 async function fetchWithRetries(
   url: string,
   init: RequestInit,
@@ -186,12 +211,14 @@ export async function fastApiRequest<T = unknown>({
   query,
   body,
   req,
+  admin,
 }: {
   path: string;
   method?: 'GET' | 'POST' | 'DELETE' | 'PUT' | 'PATCH';
   query?: QueryParams;
   body?: unknown;
   req?: NextApiRequest;
+  admin?: AdminRequestOptions;
 }): Promise<T> {
   const url = new URL(path, FASTAPI_BASE_URL);
   appendQuery(url, query);
@@ -211,21 +238,33 @@ export async function fastApiRequest<T = unknown>({
     req?.headers['x-admin-key'] ||
     req?.headers['x-admin-api-key'] ||
     req?.headers['x-api-key'];
-  if (adminApiKeyHeader) {
+  if (admin?.useServerCredentials) {
+    if (!SERVER_FASTAPI_ADMIN_API_KEY) {
+      throw new FastApiProxyError(
+        'Server-side admin credentials are not configured for this route.',
+        503,
+        {
+          detail:
+            'Set FASTAPI_ADMIN_API_KEY or ADMIN_API_KEY for explicit admin proxy routes.',
+        }
+      );
+    }
+    headers['X-Admin-Key'] = SERVER_FASTAPI_ADMIN_API_KEY;
+    headers['X-Admin-Api-Key'] = SERVER_FASTAPI_ADMIN_API_KEY;
+    headers['X-Admin-Role'] = admin.role || SERVER_FASTAPI_ADMIN_ROLE;
+    headers['X-Admin-User'] = admin.actor || SERVER_FASTAPI_ADMIN_ACTOR;
+  } else if (adminApiKeyHeader) {
     headers['X-Admin-Key'] = String(adminApiKeyHeader);
     headers['X-Admin-Api-Key'] = String(adminApiKeyHeader);
-  } else if (FASTAPI_ADMIN_API_KEY) {
-    headers['X-Admin-Key'] = FASTAPI_ADMIN_API_KEY;
-    headers['X-Admin-Api-Key'] = FASTAPI_ADMIN_API_KEY;
-  }
-  if (req?.headers['x-admin-role']) {
-    headers['X-Admin-Role'] = String(req.headers['x-admin-role']);
-  }
-  if (req?.headers['x-admin-user']) {
-    headers['X-Admin-User'] = String(req.headers['x-admin-user']);
-  }
-  if (req?.headers['x-admin-actor']) {
-    headers['X-Admin-Actor'] = String(req.headers['x-admin-actor']);
+    if (req?.headers['x-admin-role']) {
+      headers['X-Admin-Role'] = String(req.headers['x-admin-role']);
+    }
+    if (req?.headers['x-admin-user']) {
+      headers['X-Admin-User'] = String(req.headers['x-admin-user']);
+    }
+    if (req?.headers['x-admin-actor']) {
+      headers['X-Admin-Actor'] = String(req.headers['x-admin-actor']);
+    }
   }
   if (req?.headers.cookie) {
     headers.Cookie = String(req.headers.cookie);
@@ -260,6 +299,37 @@ export async function fastApiRequest<T = unknown>({
     throw new FastApiProxyError(detail, response.status, payload);
   }
   return payload as T;
+}
+
+export async function fastApiAdminRequest<T = unknown>({
+  path,
+  method = 'POST',
+  query,
+  body,
+  req,
+  actor,
+  role,
+}: {
+  path: string;
+  method?: 'GET' | 'POST' | 'DELETE' | 'PUT' | 'PATCH';
+  query?: QueryParams;
+  body?: unknown;
+  req?: NextApiRequest;
+  actor?: string;
+  role?: string;
+}): Promise<T> {
+  return fastApiRequest<T>({
+    path,
+    method,
+    query,
+    body,
+    req,
+    admin: {
+      useServerCredentials: true,
+      actor,
+      role,
+    },
+  });
 }
 
 export async function checkBackendHealth(): Promise<{

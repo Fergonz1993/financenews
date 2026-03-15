@@ -17,7 +17,6 @@ from financial_news.storage.models import (
     ArticleDedupe,
     IngestionRun,
     IngestionState,
-    RuntimeSnapshot,
     Source,
     UserAlertPreferences,
     UserSavedArticle,
@@ -1130,63 +1129,3 @@ class UserAlertPreferencesRepository:
                 await session.delete(row)
             await session.commit()
             return dict(alerts)
-
-
-class RuntimeSnapshotRepository:
-    """Durable snapshot persistence for operational control-plane state."""
-
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
-        self._session_factory = session_factory
-
-    async def get(self, scope_key: str) -> dict[str, Any] | None:
-        async with self._session_factory() as session:
-            existing = await session.get(RuntimeSnapshot, scope_key)
-            if existing is None:
-                return None
-            payload = existing.snapshot_json
-            return payload if isinstance(payload, dict) else {}
-
-    async def list_by_type(self, scope_type: str) -> dict[str, dict[str, Any]]:
-        async with self._session_factory() as session:
-            result = await session.execute(
-                select(RuntimeSnapshot).where(RuntimeSnapshot.scope_type == scope_type)
-            )
-            snapshots: dict[str, dict[str, Any]] = {}
-            for row in result.scalars().all():
-                payload = row.snapshot_json if isinstance(row.snapshot_json, dict) else {}
-                snapshots[str(row.scope_key)] = dict(payload)
-            return snapshots
-
-    async def upsert_many(
-        self,
-        snapshots: list[tuple[str, str, dict[str, Any]]],
-    ) -> None:
-        if not snapshots:
-            return
-
-        now = datetime.now(UTC)
-        keys = [scope_key for scope_key, _, _ in snapshots]
-        async with self._session_factory() as session:
-            existing_rows = await session.execute(
-                select(RuntimeSnapshot).where(RuntimeSnapshot.scope_key.in_(keys))
-            )
-            existing = {
-                str(row.scope_key): row for row in existing_rows.scalars().all()
-            }
-
-            for scope_key, scope_type, snapshot in snapshots:
-                row = existing.get(scope_key)
-                if row is None:
-                    row = RuntimeSnapshot(
-                        scope_key=scope_key,
-                        scope_type=scope_type,
-                        snapshot_json=dict(snapshot),
-                    )
-                    session.add(row)
-                    existing[scope_key] = row
-                else:
-                    row.scope_type = scope_type
-                    row.snapshot_json = dict(snapshot)
-                    row.updated_at = now
-
-            await session.commit()
