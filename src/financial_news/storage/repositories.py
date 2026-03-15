@@ -11,11 +11,13 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import and_, delete, func, or_, select
 
+from financial_news.config import get_settings
 from financial_news.storage.models import (
     Article,
     ArticleDedupe,
     IngestionRun,
     IngestionState,
+    RuntimeSnapshot,
     Source,
     UserAlertPreferences,
     UserSavedArticle,
@@ -135,6 +137,34 @@ def _topic_matches(article: dict[str, Any], topic_slug: str) -> bool:
 
 def _extract_single_column(rows: Iterable[Any], idx: int) -> set[str]:
     return {str(row[idx]) for row in rows if row[idx] is not None}
+
+
+_DEFAULT_INTERNAL_USER_ID = "operator"
+_LEGACY_INTERNAL_USER_IDS = ("anonymous", "user1")
+
+
+def _normalize_user_id(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _internal_user_aliases(user_id: str) -> list[str]:
+    normalized = _normalize_user_id(user_id)
+    if not normalized:
+        return []
+
+    configured_internal_user_id = (
+        _normalize_user_id(get_settings().identity.internal_user_id)
+        or _DEFAULT_INTERNAL_USER_ID
+    )
+    aliases = [normalized]
+    if normalized == configured_internal_user_id:
+        aliases.extend(_LEGACY_INTERNAL_USER_IDS)
+
+    deduped: list[str] = []
+    for candidate in aliases:
+        if candidate and candidate not in deduped:
+            deduped.append(candidate)
+    return deduped
 
 
 @dataclass(slots=True)
@@ -870,7 +900,27 @@ class UserArticleStateRepository:
         self, *, user_id: str, article_id: str, snapshot: dict[str, Any]
     ) -> None:
         async with self._session_factory() as session:
-            existing = await session.get(UserSavedArticle, (user_id, article_id))
+            candidate_user_ids = _internal_user_aliases(user_id)
+            existing_rows = await session.execute(
+                select(UserSavedArticle).where(
+                    and_(
+                        UserSavedArticle.article_id == article_id,
+                        UserSavedArticle.user_id.in_(candidate_user_ids),
+                    )
+                )
+            )
+            rows = list(existing_rows.scalars().all())
+            rows_by_user_id = {str(row.user_id): row for row in rows}
+            existing = rows_by_user_id.get(user_id)
+            if existing is None:
+                existing = next(
+                    (
+                        rows_by_user_id[candidate_user_id]
+                        for candidate_user_id in candidate_user_ids
+                        if candidate_user_id in rows_by_user_id
+                    ),
+                    None,
+                )
             if existing is None:
                 session.add(
                     UserSavedArticle(
@@ -880,16 +930,22 @@ class UserArticleStateRepository:
                     )
                 )
             else:
+                existing.user_id = user_id
                 existing.article_snapshot = snapshot
                 existing.saved_at = datetime.now(UTC)
+            for row in rows:
+                if row is existing:
+                    continue
+                await session.delete(row)
             await session.commit()
 
     async def unsave_article(self, user_id: str, article_id: str) -> bool:
         async with self._session_factory() as session:
+            candidate_user_ids = _internal_user_aliases(user_id)
             result = await session.execute(
                 delete(UserSavedArticle).where(
                     and_(
-                        UserSavedArticle.user_id == user_id,
+                        UserSavedArticle.user_id.in_(candidate_user_ids),
                         UserSavedArticle.article_id == article_id,
                     )
                 )
@@ -899,10 +955,11 @@ class UserArticleStateRepository:
 
     async def is_saved(self, user_id: str, article_id: str) -> bool:
         async with self._session_factory() as session:
+            candidate_user_ids = _internal_user_aliases(user_id)
             result = await session.execute(
                 select(UserSavedArticle.article_id).where(
                     and_(
-                        UserSavedArticle.user_id == user_id,
+                        UserSavedArticle.user_id.in_(candidate_user_ids),
                         UserSavedArticle.article_id == article_id,
                     )
                 )
@@ -911,11 +968,33 @@ class UserArticleStateRepository:
 
     async def list_saved(self, user_id: str) -> list[dict[str, Any]]:
         async with self._session_factory() as session:
+            candidate_user_ids = _internal_user_aliases(user_id)
             rows = await session.execute(
-                select(UserSavedArticle).where(UserSavedArticle.user_id == user_id)
+                select(UserSavedArticle).where(
+                    UserSavedArticle.user_id.in_(candidate_user_ids)
+                )
             )
-            items: list[dict[str, Any]] = []
+            saved_by_article: dict[str, UserSavedArticle] = {}
             for row in rows.scalars().all():
+                existing = saved_by_article.get(row.article_id)
+                if existing is None:
+                    saved_by_article[row.article_id] = row
+                    continue
+
+                row_is_canonical = row.user_id == user_id
+                existing_is_canonical = existing.user_id == user_id
+                if row_is_canonical and not existing_is_canonical:
+                    saved_by_article[row.article_id] = row
+                    continue
+                if row_is_canonical == existing_is_canonical and row.saved_at >= existing.saved_at:
+                    saved_by_article[row.article_id] = row
+
+            items: list[dict[str, Any]] = []
+            for row in sorted(
+                saved_by_article.values(),
+                key=lambda item: item.saved_at,
+                reverse=True,
+            ):
                 payload = row.article_snapshot if isinstance(row.article_snapshot, dict) else {}
                 payload = dict(payload)
                 payload["id"] = row.article_id
@@ -932,7 +1011,21 @@ class UserSettingsRepository:
 
     async def get(self, user_id: str) -> dict[str, Any] | None:
         async with self._session_factory() as session:
-            existing = await session.get(UserSettings, user_id)
+            candidate_user_ids = _internal_user_aliases(user_id)
+            rows = await session.execute(
+                select(UserSettings).where(UserSettings.user_id.in_(candidate_user_ids))
+            )
+            existing_by_user_id = {
+                str(row.user_id): row for row in rows.scalars().all()
+            }
+            existing = next(
+                (
+                    existing_by_user_id[candidate_user_id]
+                    for candidate_user_id in candidate_user_ids
+                    if candidate_user_id in existing_by_user_id
+                ),
+                None,
+            )
             if existing is None:
                 return None
             payload = existing.settings_json
@@ -940,13 +1033,33 @@ class UserSettingsRepository:
 
     async def upsert(self, user_id: str, settings: dict[str, Any]) -> dict[str, Any]:
         async with self._session_factory() as session:
-            existing = await session.get(UserSettings, user_id)
+            candidate_user_ids = _internal_user_aliases(user_id)
+            rows = await session.execute(
+                select(UserSettings).where(UserSettings.user_id.in_(candidate_user_ids))
+            )
+            existing_by_user_id = {
+                str(row.user_id): row for row in rows.scalars().all()
+            }
+            existing = existing_by_user_id.get(user_id)
+            legacy_rows = [
+                existing_by_user_id[candidate_user_id]
+                for candidate_user_id in candidate_user_ids
+                if candidate_user_id != user_id
+                and candidate_user_id in existing_by_user_id
+            ]
             if existing is None:
-                existing = UserSettings(user_id=user_id, settings_json=dict(settings))
-                session.add(existing)
-            else:
-                existing.settings_json = dict(settings)
-                existing.updated_at = datetime.now(UTC)
+                if legacy_rows:
+                    existing = legacy_rows[0]
+                    existing.user_id = user_id
+                else:
+                    existing = UserSettings(user_id=user_id, settings_json=dict(settings))
+                    session.add(existing)
+            existing.settings_json = dict(settings)
+            existing.updated_at = datetime.now(UTC)
+            for row in legacy_rows:
+                if row is existing:
+                    continue
+                await session.delete(row)
             await session.commit()
             return dict(settings)
 
@@ -959,7 +1072,23 @@ class UserAlertPreferencesRepository:
 
     async def get(self, user_id: str) -> dict[str, Any] | None:
         async with self._session_factory() as session:
-            existing = await session.get(UserAlertPreferences, user_id)
+            candidate_user_ids = _internal_user_aliases(user_id)
+            rows = await session.execute(
+                select(UserAlertPreferences).where(
+                    UserAlertPreferences.user_id.in_(candidate_user_ids)
+                )
+            )
+            existing_by_user_id = {
+                str(row.user_id): row for row in rows.scalars().all()
+            }
+            existing = next(
+                (
+                    existing_by_user_id[candidate_user_id]
+                    for candidate_user_id in candidate_user_ids
+                    if candidate_user_id in existing_by_user_id
+                ),
+                None,
+            )
             if existing is None:
                 return None
             payload = existing.alerts_json
@@ -967,12 +1096,97 @@ class UserAlertPreferencesRepository:
 
     async def upsert(self, user_id: str, alerts: dict[str, Any]) -> dict[str, Any]:
         async with self._session_factory() as session:
-            existing = await session.get(UserAlertPreferences, user_id)
+            candidate_user_ids = _internal_user_aliases(user_id)
+            rows = await session.execute(
+                select(UserAlertPreferences).where(
+                    UserAlertPreferences.user_id.in_(candidate_user_ids)
+                )
+            )
+            existing_by_user_id = {
+                str(row.user_id): row for row in rows.scalars().all()
+            }
+            existing = existing_by_user_id.get(user_id)
+            legacy_rows = [
+                existing_by_user_id[candidate_user_id]
+                for candidate_user_id in candidate_user_ids
+                if candidate_user_id != user_id
+                and candidate_user_id in existing_by_user_id
+            ]
             if existing is None:
-                existing = UserAlertPreferences(user_id=user_id, alerts_json=dict(alerts))
-                session.add(existing)
-            else:
-                existing.alerts_json = dict(alerts)
-                existing.updated_at = datetime.now(UTC)
+                if legacy_rows:
+                    existing = legacy_rows[0]
+                    existing.user_id = user_id
+                else:
+                    existing = UserAlertPreferences(
+                        user_id=user_id,
+                        alerts_json=dict(alerts),
+                    )
+                    session.add(existing)
+            existing.alerts_json = dict(alerts)
+            existing.updated_at = datetime.now(UTC)
+            for row in legacy_rows:
+                if row is existing:
+                    continue
+                await session.delete(row)
             await session.commit()
             return dict(alerts)
+
+
+class RuntimeSnapshotRepository:
+    """Durable snapshot persistence for operational control-plane state."""
+
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+        self._session_factory = session_factory
+
+    async def get(self, scope_key: str) -> dict[str, Any] | None:
+        async with self._session_factory() as session:
+            existing = await session.get(RuntimeSnapshot, scope_key)
+            if existing is None:
+                return None
+            payload = existing.snapshot_json
+            return payload if isinstance(payload, dict) else {}
+
+    async def list_by_type(self, scope_type: str) -> dict[str, dict[str, Any]]:
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(RuntimeSnapshot).where(RuntimeSnapshot.scope_type == scope_type)
+            )
+            snapshots: dict[str, dict[str, Any]] = {}
+            for row in result.scalars().all():
+                payload = row.snapshot_json if isinstance(row.snapshot_json, dict) else {}
+                snapshots[str(row.scope_key)] = dict(payload)
+            return snapshots
+
+    async def upsert_many(
+        self,
+        snapshots: list[tuple[str, str, dict[str, Any]]],
+    ) -> None:
+        if not snapshots:
+            return
+
+        now = datetime.now(UTC)
+        keys = [scope_key for scope_key, _, _ in snapshots]
+        async with self._session_factory() as session:
+            existing_rows = await session.execute(
+                select(RuntimeSnapshot).where(RuntimeSnapshot.scope_key.in_(keys))
+            )
+            existing = {
+                str(row.scope_key): row for row in existing_rows.scalars().all()
+            }
+
+            for scope_key, scope_type, snapshot in snapshots:
+                row = existing.get(scope_key)
+                if row is None:
+                    row = RuntimeSnapshot(
+                        scope_key=scope_key,
+                        scope_type=scope_type,
+                        snapshot_json=dict(snapshot),
+                    )
+                    session.add(row)
+                    existing[scope_key] = row
+                else:
+                    row.scope_type = scope_type
+                    row.snapshot_json = dict(snapshot)
+                    row.updated_at = now
+
+            await session.commit()
