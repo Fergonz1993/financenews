@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select, text
 
 from financial_news.storage.models import (
     Article,
@@ -368,7 +368,6 @@ class ArticleRepository:
     ) -> list[dict[str, Any]]:
         bounded_limit = max(int(limit), 1)
         bounded_offset = max(int(offset), 0)
-        needs_post_filtering = bool(topic or search)
 
         async with self._session_factory() as session:
             statement = select(Article)
@@ -394,6 +393,44 @@ class ArticleRepository:
             if published_until:
                 statement = statement.where(Article.published_at <= published_until)
 
+            # ⚡ Bolt Optimization:
+            # Pushing topic array filtering to the database level using an EXISTS subquery.
+            # This prevents fetching thousands of rows for Python-side post-filtering.
+            # ⚡ Bolt Optimization:
+            # Pushing topic array filtering to the database level to enable direct counting.
+            if topic:
+                topic_slug = _slugify(topic)
+                statement = statement.where(
+                    select(1)
+                    .select_from(func.unnest(Article.topics).alias("t"))
+                    .where(
+                        func.replace(func.lower(text("t")), " ", "-") == topic_slug
+                    )
+                    .correlate(Article)
+                    .exists()
+                )
+
+            # ⚡ Bolt Optimization:
+            # Pushing text search filtering to the database using an OR condition over multiple columns.
+            # This avoids O(N) memory overhead from loading all matching articles before pagination.
+            if search:
+                normalized = _normalize_search_text(search)
+                aliases = _collect_aliases(normalized)
+                search_conditions = []
+                for alias in aliases:
+                    term = f"%{alias}%"
+                    search_conditions.append(
+                        or_(
+                            Article.title.ilike(term),
+                            Article.content.ilike(term),
+                            Article.summarized_headline.ilike(term),
+                            Article.source_name.ilike(term),
+                            func.array_to_string(Article.topics, " ").ilike(term),
+                            func.array_to_string(Article.key_entities, " ").ilike(term),
+                        )
+                    )
+                statement = statement.where(or_(*search_conditions))
+
             if sort_by == "relevance":
                 order_by: Any = Article.market_impact_score.desc().nullslast()
             elif sort_by == "sentiment":
@@ -405,30 +442,13 @@ class ArticleRepository:
                 order_by = order_by.asc()
 
             statement = statement.order_by(order_by)
-            if not needs_post_filtering:
-                statement = statement.offset(bounded_offset).limit(bounded_limit)
+            statement = statement.offset(bounded_offset).limit(bounded_limit)
             result = await session.execute(statement)
             articles = list(result.scalars().all())
 
         payload = [self._to_payload(article) for article in articles]
 
-        if topic:
-            topic_slug = _slugify(topic)
-            payload = [article for article in payload if _topic_matches(article, topic_slug)]
-
-        if search:
-            normalized = _normalize_search_text(search)
-            aliases = _collect_aliases(normalized)
-            payload = [
-                article
-                for article in payload
-                if _search_match(article, aliases)
-            ]
-
-        if needs_post_filtering and bounded_offset:
-            payload = payload[bounded_offset:]
-
-        return payload[:bounded_limit]
+        return payload
 
     async def count_for_api(
         self,
@@ -440,7 +460,6 @@ class ArticleRepository:
         published_since: datetime | None = None,
         published_until: datetime | None = None,
     ) -> int:
-        needs_post_filtering = bool(topic or search)
 
         async with self._session_factory() as session:
             statement = select(Article)
@@ -465,27 +484,44 @@ class ArticleRepository:
             if published_until:
                 statement = statement.where(Article.published_at <= published_until)
 
-            if not needs_post_filtering:
-                total_stmt = select(func.count()).select_from(statement.subquery())
-                total_result = await session.execute(total_stmt)
-                return int(total_result.scalar() or 0)
+            # ⚡ Bolt Optimization:
+            # Pushing topic array filtering to the database level using an EXISTS subquery
+            # to enable direct DB counting without loading any records.
+            if topic:
+                topic_slug = _slugify(topic)
+                statement = statement.where(
+                    select(1)
+                    .select_from(func.unnest(Article.topics).alias("t"))
+                    .where(
+                        func.replace(func.lower(text("t")), " ", "-") == topic_slug
+                    )
+                    .correlate(Article)
+                    .exists()
+                )
 
-            result = await session.execute(statement)
-            articles = list(result.scalars().all())
+            # ⚡ Bolt Optimization:
+            # Pushing search queries directly to the database layer to avoid loading full records into memory.
+            if search:
+                normalized = _normalize_search_text(search)
+                aliases = _collect_aliases(normalized)
+                search_conditions = []
+                for alias in aliases:
+                    term = f"%{alias}%"
+                    search_conditions.append(
+                        or_(
+                            Article.title.ilike(term),
+                            Article.content.ilike(term),
+                            Article.summarized_headline.ilike(term),
+                            Article.source_name.ilike(term),
+                            func.array_to_string(Article.topics, " ").ilike(term),
+                            func.array_to_string(Article.key_entities, " ").ilike(term),
+                        )
+                    )
+                statement = statement.where(or_(*search_conditions))
 
-        payload = [self._to_payload(article) for article in articles]
-        if topic:
-            topic_slug = _slugify(topic)
-            payload = [article for article in payload if _topic_matches(article, topic_slug)]
-        if search:
-            normalized = _normalize_search_text(search)
-            aliases = _collect_aliases(normalized)
-            payload = [
-                article
-                for article in payload
-                if _search_match(article, aliases)
-            ]
-        return len(payload)
+            total_stmt = select(func.count()).select_from(statement.subquery())
+            total_result = await session.execute(total_stmt)
+            return int(total_result.scalar() or 0)
 
     async def get_sources_from_articles(self) -> list[str]:
         async with self._session_factory() as session:
