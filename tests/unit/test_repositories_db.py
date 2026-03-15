@@ -19,7 +19,9 @@ from financial_news.storage.repositories import (
     IngestionStateRepository,
     SourceConfig,
     SourceRepository,
+    UserAlertPreferencesRepository,
     UserArticleStateRepository,
+    UserSettingsRepository,
 )
 
 
@@ -64,7 +66,8 @@ async def session_factory() -> object:
             await conn.execute(
                 text(
                     "TRUNCATE TABLE "
-                    "user_saved_articles, article_dedupe, articles, ingestion_state, ingestion_runs, sources "
+                    "user_alert_preferences, user_settings, user_saved_articles, "
+                    "article_dedupe, articles, ingestion_state, ingestion_runs, sources "
                     "RESTART IDENTITY CASCADE"
                 )
             )
@@ -343,3 +346,73 @@ async def test_user_article_state_repository_flow(session_factory: object) -> No
     removed = await user_repo.unsave_article("user-1", "article-user-1")
     assert removed is True
     assert await user_repo.is_saved("user-1", "article-user-1") is False
+
+
+@pytest.mark.asyncio
+async def test_internal_operator_migrates_legacy_preferences(session_factory: object) -> None:
+    settings_repo = UserSettingsRepository(session_factory=session_factory)
+    alerts_repo = UserAlertPreferencesRepository(session_factory=session_factory)
+
+    legacy_settings = {"darkMode": False, "autoRefresh": True}
+    legacy_alerts = {"enabled": True, "rules": [{"name": "legacy"}]}
+    updated_settings = {"darkMode": True, "autoRefresh": False}
+    updated_alerts = {"enabled": False, "rules": []}
+
+    await settings_repo.upsert("anonymous", legacy_settings)
+    await alerts_repo.upsert("anonymous", legacy_alerts)
+
+    assert await settings_repo.get("operator") == legacy_settings
+    assert await alerts_repo.get("operator") == legacy_alerts
+
+    await settings_repo.upsert("operator", updated_settings)
+    await alerts_repo.upsert("operator", updated_alerts)
+
+    async with session_factory() as session:
+        settings_rows = (
+            await session.execute(text("SELECT user_id FROM user_settings ORDER BY user_id"))
+        ).all()
+        alert_rows = (
+            await session.execute(
+                text("SELECT user_id FROM user_alert_preferences ORDER BY user_id")
+            )
+        ).all()
+
+    assert settings_rows == [("operator",)]
+    assert alert_rows == [("operator",)]
+    assert await settings_repo.get("operator") == updated_settings
+    assert await alerts_repo.get("operator") == updated_alerts
+
+
+@pytest.mark.asyncio
+async def test_internal_operator_reads_and_migrates_legacy_saved_articles(
+    session_factory: object,
+) -> None:
+    user_repo = UserArticleStateRepository(session_factory=session_factory)
+
+    await user_repo.save_article(
+        user_id="user1",
+        article_id="legacy-article",
+        snapshot={"id": "legacy-article", "title": "Legacy saved article"},
+    )
+
+    assert await user_repo.is_saved("operator", "legacy-article") is True
+    saved = await user_repo.list_saved("operator")
+    assert [item["id"] for item in saved] == ["legacy-article"]
+
+    await user_repo.save_article(
+        user_id="operator",
+        article_id="legacy-article",
+        snapshot={"id": "legacy-article", "title": "Migrated saved article"},
+    )
+
+    async with session_factory() as session:
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT user_id, article_id FROM user_saved_articles "
+                    "ORDER BY user_id, article_id"
+                )
+            )
+        ).all()
+
+    assert rows == [("operator", "legacy-article")]

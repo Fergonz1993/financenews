@@ -2,8 +2,10 @@ import { NextApiRequest, NextApiResponse } from 'next';
 import {
   applyProxyResponseHeaders,
   enforceMethod,
+  fastApiAdminRequest,
   fastApiRequest,
   isBackendUnavailableError,
+  isMissingServerAdminCredentialsError,
   sendReadOnlyFallback,
   sendProxyError,
 } from '../_utils/fastapiProxy';
@@ -94,7 +96,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return;
       }
 
-      const upserted = await fastApiRequest<SourceRow>({
+      const upserted = await fastApiAdminRequest<SourceRow>({
         path: '/api/sources',
         method: 'POST',
         body: {
@@ -110,6 +112,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           rate_profile: 'standard',
         },
         req,
+        actor: 'next-crawler-admin',
+        role: 'admin',
       });
       applyProxyResponseHeaders(res, req);
       res.status(200).json({
@@ -131,15 +135,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return;
     }
 
-    await fastApiRequest({
+    await fastApiAdminRequest({
       path: `/api/sources/${encodeURIComponent(sourceId)}`,
       method: 'DELETE',
       req,
+      actor: 'next-crawler-admin',
+      role: 'admin',
     });
     applyProxyResponseHeaders(res, req);
     res.status(200).json({ status: 'Source removed' });
   } catch (error) {
-    if (isLocalApiFallbackEnabled() && isBackendUnavailableError(error)) {
+    if (
+      isLocalApiFallbackEnabled() &&
+      (isBackendUnavailableError(error) || isMissingServerAdminCredentialsError(error))
+    ) {
       if (req.method === 'GET') {
         const localSources = loadLocalSources().map((source) => ({
           id: source.id,
@@ -168,7 +177,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         sendReadOnlyFallback(
           res,
           req,
-          'Source changes are disabled while the backend is unavailable.'
+          'Source changes are disabled while the backend is unavailable or admin credentials are not configured.'
         );
         return;
       }
@@ -177,7 +186,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         sendReadOnlyFallback(
           res,
           req,
-          'Source changes are disabled while the backend is unavailable.'
+          'Source changes are disabled while the backend is unavailable or admin credentials are not configured.'
         );
         return;
       }

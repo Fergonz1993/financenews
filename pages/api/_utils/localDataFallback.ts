@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import { resolveInternalUserIds } from '../../../lib/internalIdentity';
 import { defaultSources } from '@/lib/fallback/defaultSources';
 
 export type LocalArticle = {
@@ -664,27 +665,60 @@ const loadSavedIds = (userId: string): Set<string> => {
   return new Set(ids);
 };
 
+const loadSavedIdsWithLegacy = (userId: string): Set<string> => {
+  const ids = new Set<string>();
+  resolveInternalUserIds(userId).forEach((candidateUserId) => {
+    loadSavedIds(candidateUserId).forEach((articleId) => {
+      ids.add(articleId);
+    });
+  });
+  return ids;
+};
+
 const saveSavedIds = (userId: string, ids: Set<string>): void => {
   safeWriteJson(savedArticlesPath(userId), Array.from(ids));
 };
 
 export const isArticleSavedLocally = (userId: string, articleId: string): boolean =>
-  loadSavedIds(userId).has(articleId);
+  loadSavedIdsWithLegacy(userId).has(articleId);
+
+export const listSavedArticlesLocally = (userId: string): Array<Record<string, unknown>> =>
+  Array.from(loadSavedIdsWithLegacy(userId))
+    .flatMap((articleId) => {
+      const article = getLocalArticleById(articleId);
+      if (!article) {
+        return [];
+      }
+      return [
+        {
+          ...article,
+          id: articleId,
+          is_saved: true,
+        } as Record<string, unknown>,
+      ];
+    });
 
 export const markArticleSavedLocally = (
   userId: string,
   articleId: string,
   shouldSave: boolean
 ): { user_id: string; article_id: string; is_saved: boolean } => {
-  const ids = loadSavedIds(userId);
+  const candidateUserIds = resolveInternalUserIds(userId);
+  const canonicalUserId = candidateUserIds[0] || userId;
+  const ids = loadSavedIds(canonicalUserId);
   if (shouldSave) {
     ids.add(articleId);
   } else {
     ids.delete(articleId);
   }
-  saveSavedIds(userId, ids);
+  saveSavedIds(canonicalUserId, ids);
+  candidateUserIds.slice(1).forEach((candidateUserId) => {
+    const legacyIds = loadSavedIds(candidateUserId);
+    legacyIds.delete(articleId);
+    saveSavedIds(candidateUserId, legacyIds);
+  });
   return {
-    user_id: userId,
+    user_id: canonicalUserId,
     article_id: articleId,
     is_saved: shouldSave,
   };
