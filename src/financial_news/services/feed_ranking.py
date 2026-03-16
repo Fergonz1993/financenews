@@ -10,7 +10,6 @@ import math
 import re
 from collections import Counter
 from datetime import UTC, datetime
-from difflib import SequenceMatcher
 from typing import Any
 
 _NORMALIZE_RE = re.compile(r"[^a-z0-9]+")
@@ -116,12 +115,18 @@ def suppress_near_duplicates(
     *,
     similarity_threshold: float = 0.92,
 ) -> tuple[list[dict[str, Any]], int]:
-    """Drop near-duplicate titles while keeping deterministic order."""
+    """Drop near-duplicate titles while keeping deterministic order.
+
+    Uses Jaccard similarity (word sets intersection over union) instead of
+    difflib.SequenceMatcher for O(N) string comparison performance.
+    """
     if not articles:
         return [], 0
 
     kept: list[dict[str, Any]] = []
-    fingerprints: list[str] = []
+
+    # Store tuples of (title_string, set_of_bigrams)
+    fingerprints: list[tuple[str, set[str]]] = []
     suppressed = 0
 
     for article in articles:
@@ -130,12 +135,28 @@ def suppress_near_duplicates(
             kept.append(article)
             continue
 
+        # Use character bigrams for better approximation of SequenceMatcher
+        # Pad with spaces to capture word boundaries
+        padded_title = f" {title} "
+        title_bigrams = {padded_title[i:i+2] for i in range(len(padded_title) - 1)}
+        title_bigrams_len = len(title_bigrams)
         is_duplicate = False
-        for existing in fingerprints:
-            if title == existing:
+
+        for existing_title, existing_bigrams in fingerprints:
+            if title == existing_title:
                 is_duplicate = True
                 break
-            if SequenceMatcher(None, title, existing).ratio() >= similarity_threshold:
+
+            if not title_bigrams or not existing_bigrams:
+                continue
+
+            intersection_size = len(title_bigrams & existing_bigrams)
+
+            # SequenceMatcher ratio is roughly equivalent to 2*|A ∩ B| / (|A| + |B|)
+            # which is Dice coefficient, but Jaccard is |A ∩ B| / |A U B|
+            # We can compute a Dice-like coefficient from intersection and total length
+            total_len = title_bigrams_len + len(existing_bigrams)
+            if total_len > 0 and (2 * intersection_size / total_len) >= similarity_threshold:
                 is_duplicate = True
                 break
 
@@ -143,7 +164,7 @@ def suppress_near_duplicates(
             suppressed += 1
             continue
 
-        fingerprints.append(title)
+        fingerprints.append((title, title_bigrams))
         kept.append(article)
 
     return kept, suppressed

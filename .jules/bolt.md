@@ -1,3 +1,3 @@
-## 2024-03-12 - Optimize get_topics_from_articles database query
-**Learning:** Found a performance bottleneck where a list of unique array topics was constructed via nested Python loops after pulling full records from PostgreSQL instead of letting PostgreSQL `unnest` do the lifting.
-**Action:** When working with PostgreSQL ARRAY columns in SQLAlchemy, prefer `func.unnest(Column).label("...")` combined with `.distinct()` inside the database query to reduce the Python application memory footprint and parsing overhead.
+## 2025-02-28 - Investigate bottlenecks in news processing pipeline
+**Learning:** `suppress_near_duplicates` in `src/financial_news/services/feed_ranking.py` has a nested loop that calculates SequenceMatcher.ratio() between every article title and all previously seen fingerprints. This is O(N^2) where N is the number of articles and SequenceMatcher is notoriously slow, making it O(N^2 * M^2) where M is the length of the titles. This is a severe performance bottleneck for large feeds.
+**Action:** Replace the O(N^2) near-duplicate string matching algorithm with an efficient locality-sensitive hashing (LSH) approach, MinHash, or simple N-gram set overlap (Jaccard similarity) which is much faster than `difflib.SequenceMatcher`.
